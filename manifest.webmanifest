@@ -1,0 +1,18 @@
+{
+  "name": "FSS Manager — Fudokan savez Srbije",
+  "short_name": "FSS Manager",
+  "description": "Vođenje takmičenja Fudokan saveza Srbije — prijave, kategorije i zvanični dokumenti spremni za štampu na A4. Radi bez interneta.",
+  "lang": "sr-Latn-RS",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f2f2f3",
+  "theme_color": "#5980a6",
+  "icons": [
+    { "src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="sr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kontrolna tabla · Fudokan savez Srbije</title>
+<meta name="theme-color" content="#5980a6">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="assets/icons/favicon-64.png" sizes="64x64" type="image/png">
+<link rel="icon" href="assets/icons/icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+
+<!-- Ništa na ovoj strani ne dodiruje mrežu: fontovi se služe iz assets/fonts,
+     a service worker keširа ostalo. -->
+<link rel="stylesheet" href="assets/css/fonts.css">
+<link rel="stylesheet" href="assets/css/industry.css">
+<link rel="stylesheet" href="assets/css/app.css">
+<!-- Papir za dugme „Štampaj" — isti list koji izlazi i iz documents.html. -->
+<link rel="stylesheet" href="assets/css/doc-sheet.css">
+</head>
+<body>
+
+<div class="app" id="app"></div>
+<div id="modal"></div>
+<div id="toast" class="toast" role="status" hidden></div>
+
+<!-- Klasična skripta, pa se <doc-page> registruje pre nego što modul krene. -->
+<script src="assets/js/doc-page.js"></script>
+<script type="module" src="assets/js/app.js"></script>
+
+<script>
+  // Registruje offline keš. Traži siguran kontekst, pa ništa ne radi kad se
+  // folder otvori direktno iz Findera preko file:// — koristi start.command.
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      // updateViaCache: 'none' — sam sw.js se nikad ne uzima iz HTTP keša,
+      // inače osvežen folder ume da danima služi staru verziju. update()
+      // pri svakom otvaranju natera proveru odmah, a ne kad pregledaču
+      // padne na pamet.
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+        .then((reg) => reg.update())
+        .catch((err) => {
+          console.warn('Offline keš nije registrovan:', err.message);
+        });
+    });
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,92 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Zvanični dokumenti — print module for the Fudokan savez Srbije TMS.
+
+   Two layers live here:
+     1. the on-screen toolbar (never printed), styled from the Industry
+        design-system tokens in industry.css;
+     2. the document sheet itself, which is deliberately token-free — an
+        official document is ink on paper, so it is pinned to fixed black
+        (#111315) and fixed point-like sizes rather than following the
+        app's theme.
+
+   The sheet itself lives in doc-sheet.css, shared with the app's own
+   print button — this file is only what is specific to this page.
+   ══════════════════════════════════════════════════════════════════════ */
+
+html, body { margin: 0; padding: 0; }
+a { color: var(--color-accent-700); text-decoration: none; }
+a:hover { color: var(--color-accent-900); }
+
+/* ── Toolbar ─────────────────────────────────────────────────────────── */
+
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 10px 20px;
+  background: var(--color-neutral-100);
+  border-bottom: 1px solid var(--color-text);
+  font-family: var(--font-body);
+}
+
+.toolbar-back { font-size: 12px; color: var(--color-accent-700); }
+
+.toolbar-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--color-neutral-400);
+}
+
+.toolbar-label {
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--color-neutral-600);
+}
+
+.toolbar-types { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+
+.toolbar-type {
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 1.55;
+  padding: 3px 9px;
+  cursor: pointer;
+  border: 1px solid var(--color-neutral-400);
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-text);
+}
+.toolbar-type:hover { border-color: var(--color-neutral-600); }
+.toolbar-type[aria-selected="true"] {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: #fff;
+}
+.toolbar-type:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+.toolbar-meta {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--color-neutral-700);
+}
+
+.toolbar-print {
+  height: 29px;
+  padding: 0 14px;
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  border-radius: 0;
+  font-family: var(--font-heading);
+  font-size: 12px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #fff;
+  cursor: pointer;
+}
+.toolbar-print:hover { background: var(--color-accent-600); border-color: var(--color-accent-600); }
+.toolbar-print:active { background: var(--color-accent-700); border-color: var(--color-accent-700); }

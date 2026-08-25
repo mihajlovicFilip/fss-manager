@@ -1,0 +1,68 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Barlow & Barlow Condensed — served from this folder, not from a CDN.
+
+   The app has to print official documents in sports halls with no internet,
+   so no stylesheet here may reach the network. These are the upstream
+   Google Fonts releases (SIL Open Font License 1.1 — see assets/fonts/OFL.txt),
+   subset to Latin + Latin Extended and converted to WOFF.
+
+   Latin Extended is kept on purpose: club and competitor names from
+   Vojvodina carry Hungarian, Slovak and Romanian diacritics alongside the
+   Serbian č ć ž š đ.
+
+   There is no Cyrillic here, and nothing on the sheet needs it: Barlow ships
+   none, and the uzrasne grupe are coded in Latin A–J for exactly that reason
+   (see AGES in assets/js/data.js). Any Cyrillic text added later would fall
+   back to a system font and set about twice as wide as its surroundings.
+   ══════════════════════════════════════════════════════════════════════ */
+
+@font-face {
+  font-family: 'Barlow';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('../fonts/barlow-400.woff') format('woff');
+}
+@font-face {
+  font-family: 'Barlow';
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url('../fonts/barlow-500.woff') format('woff');
+}
+@font-face {
+  font-family: 'Barlow';
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url('../fonts/barlow-600.woff') format('woff');
+}
+
+@font-face {
+  font-family: 'Barlow Condensed';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('../fonts/barlow-condensed-400.woff') format('woff');
+}
+@font-face {
+  font-family: 'Barlow Condensed';
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url('../fonts/barlow-condensed-500.woff') format('woff');
+}
+@font-face {
+  font-family: 'Barlow Condensed';
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url('../fonts/barlow-condensed-600.woff') format('woff');
+}
+@font-face {
+  font-family: 'Barlow Condensed';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url('../fonts/barlow-condensed-700.woff') format('woff');
+}

@@ -1,0 +1,355 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   List — the paper itself.
+
+   Everything below describes one printed sheet: the letterhead, the title
+   band, the table and the foot. It is shared by the standalone documents
+   page (dokumenti.html) and by the print button on every list inside the
+   app, so both put the same paper in the tray.
+
+   Deliberately token-free. An official document is ink on paper, so it is
+   pinned to fixed black (#111315) and fixed point-like sizes rather than
+   following the app's theme — the sheet must not change when the app does.
+
+   The page box, the page breaks and the @page rule belong to <doc-page>
+   (assets/js/doc-page.js). Never add break-before/after or @page rules
+   here.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* The component owns the sheet chrome; hide the unstyled markup until it
+   upgrades so the pages never flash at full width. */
+doc-page:not(:defined) { visibility: hidden; }
+
+@media print {
+  .no-print { display: none !important; }
+}
+
+/* ── Sheet ───────────────────────────────────────────────────────────── */
+
+/* Explicitly paginated pages are full-bleed by definition — <doc-page>
+   hands the whole sheet over and the content owns its insets, so the
+   printable margin lives here and nowhere else. 14mm clears the
+   unprintable edge of every common office printer. */
+.page {
+  display: flex;
+  flex-direction: column;
+  padding: 14mm;
+  font-family: var(--font-body);
+  color: #111315;
+}
+
+/* The measuring pass (documents.js) lays one throwaway page out here, at
+   the true A4 page width and at natural height, to read the real row and
+   chrome heights back out of the layout. Off-screen rather than
+   display:none — a hidden element has no geometry to measure. */
+.doc-measure {
+  position: absolute;
+  top: 0;
+  left: -20000px;
+  visibility: hidden;
+  pointer-events: none;
+}
+.doc-measure .page.is-probe { height: auto; overflow: visible; }
+.doc-measure .page.is-probe > * { flex-shrink: 0; }
+
+/* Letterhead */
+.doc-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding-bottom: 9px;
+  border-bottom: 2px solid #111315;
+}
+/* The grb sets its own outline, so it needs no box drawn around it. Height
+   is fixed and width follows, so swapping the artwork can never stretch it. */
+.doc-crest {
+  height: 52px;
+  width: auto;
+  flex: none;
+  display: block;
+  /* Printers otherwise drop background artwork to save ink. */
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+.doc-org { flex: 1; min-width: 0; }
+.doc-org-name {
+  font-family: var(--font-heading);
+  font-size: 17px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  line-height: 1.1;
+}
+.doc-org-sub {
+  margin-top: 2px;
+  font-size: 9.5px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: #4c5257;
+}
+.doc-comp { flex: none; text-align: right; }
+.doc-comp-name {
+  font-family: var(--font-heading);
+  font-size: 13.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.doc-comp-sub { margin-top: 2px; font-size: 10.5px; color: #3c4247; }
+
+/* Document title band */
+.doc-title-band {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 13px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #111315;
+}
+.doc-kicker {
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #5a6065;
+}
+.doc-title {
+  margin-top: 3px;
+  font-family: var(--font-heading);
+  font-size: 21px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  line-height: 1.1;
+}
+.doc-title-meta {
+  text-align: right;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: #3c4247;
+}
+
+/* Table */
+.doc-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+}
+.doc-table th {
+  padding: 5px 6px;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #111315;
+  border-bottom: 1px solid #111315;
+  white-space: nowrap;
+  text-align: left;
+}
+.doc-table td {
+  padding: 4.5px 6px;
+  font-size: 10.5px;
+  text-align: left;
+}
+.doc-table .is-center { text-align: center; }
+.doc-table .is-right { text-align: right; }
+.doc-table td.is-center,
+.doc-table td.is-right { font-variant-numeric: tabular-nums; }
+.doc-table td.is-strong { font-weight: 600; }
+
+.doc-table tbody tr { border-bottom: 1px solid #d6d9db; }
+.doc-table tbody tr.is-zebra { background: #f4f5f6; }
+/* Team blocks: hairline between members, a solid rule closing each team. */
+.doc-table tbody tr.is-group-inner { border-bottom: 0.5px solid #d6d9db; }
+.doc-table tbody tr.is-group-end { border-bottom: 1px solid #111315; }
+
+/* Totals row (`spec.foot`) — last page only, so it reads as the end of the
+   table and not as one more entry. Ruled off above rather than shaded,
+   because a shaded row photocopies as just another zebra stripe.
+   No document uses it today: summing everyone's points was dropped on
+   Filip's word — a point belongs to a competitor and through them to a
+   club, and the total of everybody's is nobody's. Kept for a list that
+   genuinely totals something, like a tatami schedule's running time. */
+.doc-table tfoot td {
+  padding: 6px 5px 3px;
+  border-top: 1.5px solid #111315;
+  font-weight: 600;
+}
+.doc-table tfoot td.is-center,
+.doc-table tfoot td.is-right { font-variant-numeric: tabular-nums; }
+
+/* Totals line */
+.doc-summary {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 9px;
+  padding-top: 6px;
+  border-top: 1px solid #111315;
+  font-size: 10.5px;
+}
+.doc-summary-right { font-variant-numeric: tabular-nums; }
+
+/* Foot of the sheet — pushed down so the footer sits on the paper edge. */
+.doc-foot { margin-top: auto; padding-top: 22px; }
+
+.doc-signatures {
+  display: flex;
+  gap: 34px;
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+.doc-sign { width: 190px; text-align: center; }
+.doc-sign-rule { height: 1px; background: #111315; }
+.doc-sign-label {
+  margin-top: 5px;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #3c4247;
+}
+
+.doc-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-top: 5px;
+  border-top: 1px solid #9aa0a5;
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #5a6065;
+}
+
+/* ── Blok-ćelija ──────────────────────────────────────────────────────── */
+
+/* Raspored po borilištima: kolona je borilište, ćelija je jedan blok —
+   naslov grupe i spisak disciplina pod njim. Ćelije su vrhom poravnate,
+   jer se čitaju odozgo naniže, kolona po kolona. */
+.doc-table td.is-block {
+  vertical-align: top;
+  padding: 7px 7px 8px;
+  border-right: 1px solid #d6d9db;
+}
+.doc-table td.is-block:last-child { border-right: 0; }
+
+.doc-block-head {
+  font-family: var(--font-heading);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  line-height: 1.25;
+}
+.doc-block-note {
+  margin-top: 1px;
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #5a6065;
+}
+/* Spisak disciplina teče u red i prelama se — deset disciplina u koloni bi
+   inače napravilo ćeliju višu od lista. */
+.doc-block-list {
+  margin-top: 3px;
+  font-size: 9.5px;
+  line-height: 1.45;
+  color: #2a3034;
+}
+
+/* ── Grana žreba ──────────────────────────────────────────────────────── */
+
+/* Sve unutra je postavljeno apsolutno, u milimetrima, izračunato u
+   doc-render.js — meč u drugoj koloni mora da stoji tačno na sredini
+   između dva iz kojih izlazi, a to red i kolona ne umeju. */
+.br { position: relative; margin-top: 8px; }
+
+.br-match { position: absolute; }
+.br-tag {
+  height: 3.4mm;
+  font-size: 0.78em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6b7176;
+  line-height: 3.4mm;
+}
+.br-col {
+  position: absolute;
+  top: 0;
+  font-family: var(--font-heading);
+  font-size: 0.85em;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #3c4247;
+}
+/* Broj meča u žlebu levo — tamo gde za oznaku iznad kutije nema visine. */
+.br-no {
+  position: absolute;
+  width: 4mm;
+  text-align: right;
+  font-size: 0.8em;
+  color: #6b7176;
+}
+
+.br-box {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #2f3a45;
+}
+.br-slot {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-height: 0;
+  border-bottom: 1px solid #2f3a45;
+}
+.br-slot:last-child { border-bottom: 0; }
+.br-name {
+  flex: 1;
+  min-width: 0;
+  padding: 0 1.4mm;
+  /* Duga imena se seku sa tri tačke umesto da razvale kutiju — grana mora
+     da ostane na jednom listu. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Kutijica za rezultat, desno od imena — popunjava je sudija na tatamiju. */
+.br-score {
+  flex: none;
+  width: 5.5mm;
+  align-self: stretch;
+  border-left: 1px solid #2f3a45;
+}
+.br-slot.is-bye .br-name { color: #7d8388; }
+.br-slot.is-open .br-name { color: transparent; }
+
+/* Spojnice su tanke linije, svetlije od kutija — vode oko, ne otimaju ga. */
+.br-link {
+  position: absolute;
+  border-top: 0.6px solid #9aa0a5;
+  height: 0;
+}
+.br-link.is-v {
+  border-top: 0;
+  border-left: 0.6px solid #9aa0a5;
+  width: 0;
+}
+
+/* ── Mesta za upis osvojenih mesta ────────────────────────────────────── */
+
+.br-places {
+  display: flex;
+  gap: 10mm;
+  margin-top: 9mm;
+  padding-top: 5mm;
+  border-top: 1px solid #111315;
+}
+.br-place { flex: 1; }
+.br-place-label {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #3c4247;
+}
+.br-place-rule {
+  margin-top: 7mm;
+  border-bottom: 1px solid #111315;
+}

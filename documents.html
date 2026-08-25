@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="sr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zvanični dokumenti · Fudokan savez Srbije</title>
+<meta name="theme-color" content="#5980a6">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="assets/icons/favicon-64.png" sizes="64x64" type="image/png">
+<link rel="icon" href="assets/icons/icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+
+<!-- Nothing on this page touches the network: the fonts are served from
+     assets/fonts and a service worker caches the rest, so the documents
+     print in a hall with no internet. -->
+<link rel="stylesheet" href="assets/css/fonts.css">
+<link rel="stylesheet" href="assets/css/industry.css">
+<link rel="stylesheet" href="assets/css/doc-sheet.css">
+<link rel="stylesheet" href="assets/css/documents.css">
+</head>
+<body>
+
+<!-- Toolbar — screen only, never printed. -->
+<div class="toolbar no-print">
+  <a class="toolbar-back" href="index.html">← Nazad u aplikaciju</a>
+  <span class="toolbar-sep" aria-hidden="true"></span>
+  <span class="toolbar-label">Dokument</span>
+  <div class="toolbar-types" id="doc-types" role="tablist" aria-label="Vrsta dokumenta"></div>
+  <span class="toolbar-meta" id="doc-meta"></span>
+  <button type="button" class="toolbar-print" id="doc-print">Štampaj / PDF</button>
+</div>
+
+<!-- Explicit pagination: one <section class="page"> per sheet, rendered by
+     documents.js. The page inset lives on .page (see documents.css) —
+     doc-page's margin= applies to flowing documents only. -->
+<doc-page id="doc-sheet" size="a4" orientation="portrait"></doc-page>
+
+<script src="assets/js/doc-page.js"></script>
+<script type="module" src="assets/js/documents.js"></script>
+
+<script>
+  // Registers the offline cache. Needs a secure context, so it is a no-op
+  // when the folder is opened straight from Finder over file:// — the app
+  // still runs, it just is not cached. Use start.command instead.
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      // updateViaCache: 'none' — sam sw.js se nikad ne uzima iz HTTP keša,
+      // inače osvežen folder ume da danima služi staru verziju. update()
+      // pri svakom otvaranju natera proveru odmah, a ne kad pregledaču
+      // padne na pamet.
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+        .then((reg) => reg.update())
+        .catch((err) => {
+          console.warn('Offline keš nije registrovan:', err.message);
+        });
+    });
+  }
+</script>
+</body>
+</html>
