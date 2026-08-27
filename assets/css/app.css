@@ -766,6 +766,115 @@ details.disc.has-over .disc-name { color: #8a2a2a; }
 .result-row[hidden] { display: none; }
 
 
+/* Kolona sa dugmetom „Izmeni" — uska koliko i sama reč, i postoji samo dok
+   su prijave otvorene. */
+.col-edit { width: 1%; white-space: nowrap; text-align: right; }
+
+/* „+ Nova prijava" stoji uz brojač, na desnom kraju alatne trake. */
+.list-tools [data-new-entry] { margin-left: auto; }
+
+/* ── Podešavanja ──────────────────────────────────────────────────────── */
+
+/* Okvir cenovnika koristi izgled okvira sa Diploma, samo bez sklapanja —
+   ovde nema šta da se skloni, to je ceo ekran. */
+.dip-setup-head.is-static { cursor: default; }
+.dip-setup-head.is-static::before { display: none; }
+.dip-setup-head.is-static:hover { background: none; }
+
+.fee-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.fee-row .field.is-grow { flex: 1; min-width: 320px; }
+.fee-row .control.is-narrow { width: 150px; }
+.fee-block {
+  padding-top: 14px;
+  border-top: 1px solid var(--color-divider);
+}
+.field-note {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--color-neutral-600);
+}
+.empty-screen.is-quiet { margin-top: 26px; opacity: 0.75; }
+
+/* Naslov kolone koji postoji za čitač ekrana, a na ekranu ne zauzima ništa. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Dijalog ispravke je širi od potvrde — u njemu stoji ceo formular. */
+.modal.is-wide { width: 640px; }
+.modal-actions .modal-spacer { flex: 1; }
+.modal-actions .modal-note { margin: 0; flex: 1 1 auto; }
+
+/* ── Diplome ──────────────────────────────────────────────────────────── */
+
+/* Podešavanje mera stoji u okviru, odvojeno od spiska osvajača: to je jedini
+   deo aplikacije koji ne opisuje takmičenje nego papir na kom se štampa. */
+.dip-setup {
+  margin-bottom: 22px;
+  border: 1px solid var(--color-neutral-400);
+}
+.dip-setup-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.dip-setup-head::-webkit-details-marker { display: none; }
+.dip-setup-head::before {
+  content: '';
+  flex: none;
+  width: 0;
+  height: 0;
+  border-left: 5px solid var(--color-neutral-600);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform 0.12s ease;
+}
+.dip-setup[open] > .dip-setup-head::before { transform: rotate(90deg); }
+.dip-setup-head:hover { background: var(--color-accent-100); }
+.dip-setup-head:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+.dip-setup-title {
+  font-family: var(--font-heading);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.dip-setup-actions { margin-left: auto; display: flex; gap: 8px; }
+.dip-setup-body { padding: 4px 16px 18px; }
+.dip-setup .filters { margin-bottom: 14px; }
+
+.dip-rows { display: flex; flex-direction: column; gap: 10px; }
+.dip-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-divider);
+}
+/* Isključen red se i dalje vidi i menja — samo je jasno da na papir ne ide. */
+.dip-row.is-off { opacity: 0.5; }
+.dip-row .pick { align-self: center; width: 168px; }
+.dip-field { display: flex; flex-direction: column; }
+.dip-field .control { width: 132px; }
+
 /* ── Filteri iznad spiska ─────────────────────────────────────────────── */
 
 .filters {
@@ -1130,6 +1239,15 @@ details.disc.has-over .disc-name { color: #8a2a2a; }
   border: 1px solid var(--color-neutral-300);
 }
 .pf-card.is-done { border-color: var(--color-accent); background: var(--color-accent-100); }
+/* Imenjaci: jedina stavka na kartici uvoza o kojoj urednik treba da odluči. */
+.pf-note {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-neutral-800);
+  border-top: 1px solid var(--color-neutral-300);
+}
 .pf-facts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -1191,3 +1309,10 @@ a.btn-app { display: inline-flex; align-items: center; text-decoration: none; }
 .pf-file-bad { margin-left: auto; color: #8a2a2a; font-weight: 500; font-size: 11.5px; }
 .pf-file-body { padding: 4px 14px 14px; }
 .pf-file-body .import-grid + .import-grid { margin-top: 16px; }
+
+/* Štampa po kategoriji i po disciplini — diplome se pišu redom kojim se
+   kategorije završavaju, pa svaka ima svoje dugme. */
+.cat-head .btn-app,
+.disc-head .btn-app { height: 24px; padding: 0 10px; font-size: 10.5px; }
+.cat-head .btn-app { margin-left: 12px; }
+.disc-head .btn-app { margin-left: 14px; }

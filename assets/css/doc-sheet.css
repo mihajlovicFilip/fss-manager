@@ -217,40 +217,152 @@ doc-page:not(:defined) { visibility: hidden; }
   color: #5a6065;
 }
 
-/* ── Blok-ćelija ──────────────────────────────────────────────────────── */
+/* ── Tabla ────────────────────────────────────────────────────────────── */
 
-/* Raspored po borilištima: kolona je borilište, ćelija je jedan blok —
-   naslov grupe i spisak disciplina pod njim. Ćelije su vrhom poravnate,
-   jer se čitaju odozgo naniže, kolona po kolona. */
-.doc-table td.is-block {
-  vertical-align: top;
-  padding: 7px 7px 8px;
+/* Raspored po borilištima: kolona je borilište, kartica je jedan nastup —
+   naslov grupe i spisak disciplina pod njim.
+
+   Namerno nije tabela. U tabeli je red vodoravna celina i visok je koliko
+   njegova najviša ćelija, pa borilište sa šesnaest stavki razvuče i ona
+   koja imaju po šest — i raspored koji staje na jedan list ispadne na tri.
+   Ovde svaka kolona teče sama za sebe.
+
+   Kolone su rastegnute na istu visinu (grid to radi sam), da linija koja
+   deli borilišta ide do dna najduže kolone, a ne da se prekida na pola. */
+.board {
+  display: grid;
+  grid-template-columns: repeat(var(--board-cols, 2), minmax(0, 1fr));
+  column-gap: 11px;
+  margin-top: 10px;
+}
+/* Slog table je jedini na listu koji sme da se smanji: renderer traži
+   najveću meru koja ceo raspored smešta na jedan list i tu meru upiše u
+   --board-scale. Zaglavlje lista, naslov i podnožje ostaju kakvi jesu, da
+   se raspored ne razlikuje od ostalih dokumenata ni po čemu osim po gustini
+   sopstvenog spiska. */
+.board-col {
+  display: flex;
+  flex-direction: column;
+  row-gap: calc(5px * var(--board-scale, 1));
+  padding-right: 10px;
   border-right: 1px solid #d6d9db;
 }
-.doc-table td.is-block:last-child { border-right: 0; }
+.board-col:last-child { padding-right: 0; border-right: 0; }
 
-.doc-block-head {
+.board-head {
+  padding-bottom: 4px;
   font-family: var(--font-heading);
-  font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.09em;
+  font-size: 9px;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  line-height: 1.25;
+  border-bottom: 1px solid #111315;
 }
-.doc-block-note {
-  margin-top: 1px;
-  font-size: 8.5px;
-  letter-spacing: 0.1em;
+
+.board-card-head {
+  font-family: var(--font-heading);
+  font-size: calc(9.5px * var(--board-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
+  line-height: 1.3;
+}
+/* Redni broj nastupa je oznaka, ne deo naslova — zato je u žlebu ispred
+   njega, sivlji i uže razmaknut. */
+.board-card-no {
+  margin-right: 4px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
   color: #5a6065;
 }
-/* Spisak disciplina teče u red i prelama se — deset disciplina u koloni bi
-   inače napravilo ćeliju višu od lista. */
-.doc-block-list {
-  margin-top: 3px;
-  font-size: 9.5px;
-  line-height: 1.45;
+/* Spisak disciplina teče u red i prelama se — deset disciplina jedna ispod
+   druge napravilo bi karticu višu od lista. */
+.board-card-list {
+  margin-top: 1px;
+  font-size: calc(9px * var(--board-scale, 1));
+  line-height: 1.4;
   color: #2a3034;
+}
+
+/* ── Upis na diplomu ──────────────────────────────────────────────────── */
+
+/* Diploma je već odštampana; ovde se na nju samo upisuje. Zato list nema
+   ništa od uobičajenog papira — ni zaglavlje, ni naslov, ni podnožje, ni
+   margine — nego prazninu i tekst na izmerenom mestu. Milimetri se broje od
+   ivice lista, jer je to jedino što se na diplomi meri lenjirom. */
+.page.is-slip {
+  display: block;
+  position: relative;
+  padding: 0;
+}
+
+/* Levu ivicu i širinu upisuje renderer, u milimetrima: red je centriran na
+   izmerenom mestu, a širok tačno do pola razmaka do suseda na istoj visini. */
+.slip-line {
+  position: absolute;
+  text-align: center;
+  line-height: 1.2;
+}
+.slip-line.is-caps {
+  font-family: var(--font-heading);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.slip-line.is-strong { font-weight: 600; }
+
+/* Lenjir postoji samo na probnom listu i namerno je svetao: štampa se na
+   običan papir koji se prislanja uz diplomu, pa mu treba tačnost, a ne
+   težina. */
+.slip-ruler {
+  position: absolute;
+  inset: 0;
+  color: #5a6065;
+}
+.slip-tick {
+  position: absolute;
+  width: 4mm;
+  border-top: 0.3px solid #9aa0a5;
+}
+.slip-tick.is-left { left: 0; }
+.slip-tick.is-right { right: 0; }
+.slip-tick.is-ten {
+  width: 8mm;
+  border-top-color: #5a6065;
+}
+.slip-mm {
+  position: absolute;
+  font-size: 6.5pt;
+  line-height: 1;
+  transform: translateY(-50%);
+}
+.slip-mm.is-left { left: 9mm; }
+.slip-mm.is-right { right: 9mm; }
+
+.slip-col {
+  position: absolute;
+  top: 26mm;
+  bottom: 12mm;
+  border-left: 0.3px dotted #c3c7ca;
+}
+.slip-col.is-mid { border-left: 0.4px dashed #7d8388; }
+.slip-col-mm {
+  position: absolute;
+  top: 21mm;
+  font-size: 6.5pt;
+  line-height: 1;
+  transform: translateX(-50%);
+}
+
+/* Uputstvo stoji na probnom listu, a ne u aplikaciji: čita ga onaj ko drži
+   papir u ruci, u trenutku kad mu treba. */
+.slip-note {
+  position: absolute;
+  top: 8mm;
+  left: 14mm;
+  right: 14mm;
+  font-size: 7.5pt;
+  line-height: 1.5;
+  color: #3c4247;
 }
 
 /* ── Grana žreba ──────────────────────────────────────────────────────── */

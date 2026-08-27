@@ -52,7 +52,7 @@ export const DEMO_VERSION = 6;
  * se pogleda dno navigacije i odmah zna. Podiže se zajedno sa `CACHE` u
  * sw.js.
  */
-export const APP_VERSION = 'v41';
+export const APP_VERSION = 'v60';
 
 export const SEED_COMPETITION = {
   name: 'Prvenstvo Srbije 2026',
@@ -111,8 +111,105 @@ export const PLACEMENTS = [
 
 export const placementByKey = (key) => PLACEMENTS.find((p) => p.key === key) || null;
 
+/**
+ * Koliko puta jedan plasman sme da se dodeli unutar jedne kategorije.
+ * `null` znači neograničeno.
+ *
+ * Po pravilniku kategorija ima jedno prvo, jedno drugo i dva treća mesta.
+ * Discipline koje se ne izvlače nego mere ili boduju — kihon u mestu i
+ * tamashiwari — nose `openPlacements`, pa im broj istih plasmana nije ograničen.
+ */
+export const placementSlots = (discipline, key) => {
+  if (disciplineByName(discipline)?.openPlacements) return null;
+  return placementByKey(key)?.slots ?? null;
+};
+
 /** Bodovi za jedan plasman. Nepoznat ili neupisan plasman ne nosi ništa. */
 export const pointsFor = (key) => placementByKey(key)?.points || 0;
+
+/**
+ * Upis na već odštampanu diplomu.
+ *
+ * Diplome se štampaju unapred, u tiražu, sa gotovim tekstom i praznim
+ * linijama; posle takmičenja se u te linije upisuje ko je šta osvojio. Papir
+ * je dakle zadat, a aplikacija na njemu ima samo četiri mesta — i mora da
+ * pogodi svako.
+ *
+ * Zato se ne opisuje izgled nego **položaj**: za svaki red koliko je
+ * milimetara od gornje ivice lista, koliko levo (−) ili desno (+) od sredine,
+ * i koliko je slovo veliko u tipografskim tačkama. Sve troje meri urednik na
+ * svojoj diplomi, jednom, i to ostaje upisano — blanko se ne menja godinama.
+ *
+ * Ovo su samo početne mere, da polja ne budu prazna: nijedna diploma nije
+ * kao druga, pa se prvo štampa probni list sa lenjirom.
+ */
+export const DIPLOMA_LINES = [
+  { key: 'ime',        label: 'Ime i prezime', top: 108, x: 0,   size: 22, caps: true },
+  { key: 'klub',       label: 'Klub',          top: 122, x: 0,   size: 12, caps: false },
+  { key: 'mesto',      label: 'Mesto',         top: 142, x: -38, size: 13, caps: false },
+  { key: 'disciplina', label: 'Disciplina',    top: 142, x: 22,  size: 13, caps: false },
+  { key: 'kategorija', label: 'Kategorija',    top: 154, x: 0,   size: 11, caps: false },
+];
+
+export const DIPLOMA_DEFAULT = {
+  orientation: 'portrait',
+  lines: DIPLOMA_LINES.reduce((acc, line) => ({
+    ...acc,
+    [line.key]: { on: true, top: line.top, x: line.x, size: line.size },
+  }), {}),
+};
+
+/**
+ * Kotizacije.
+ *
+ * Klub plaća po **prijavi, ne po takmičaru**: ko je prijavljen u tri
+ * discipline plaća tri kotizacije. Ekipa se plaća kao celina, bez obzira na
+ * broj članova, a enbu ima svoj iznos jer je par.
+ *
+ * Starijim uzrastima savez oprašta prve tri discipline (`free.count` u
+ * grupama `free.groups`) — ali ne sve: **tamashiwari i tsumeai se plaćaju
+ * uvek**, kao i svaka ekipna prijava. Zato oproštaj ne skida sa ukupnog broja
+ * nego samo sa onih disciplina koje smeju da budu besplatne.
+ *
+ * Iznosi kreću od nule namerno: aplikacija ne izmišlja cenu. Dok se ne unesu
+ * u Podešavanjima, list kotizacija to i piše.
+ */
+export const FEES_DEFAULT = {
+  individual: 0,
+  team: 0,
+  enbu: 0,
+  coachRefund: 0,
+  free: {
+    count: 3,
+    groups: 'HIJ',
+    always: ['Tamashiwari', 'Tsumeai'],
+  },
+};
+
+/** „1.500 din" — dinari, bez para, po domaćem pisanju hiljada. */
+export const money = (amount) =>
+  `${new Intl.NumberFormat('sr-RS').format(Math.round(amount || 0))} din`;
+
+/**
+ * Koliko kotizacija duguje jedan takmičar, i koliko mu je oprošteno.
+ *
+ * @param {Array} entries pojedinačne prijave tog takmičara
+ * @param {object} fees   podešavanje kotizacija
+ */
+export function feeCountFor(entries, fees) {
+  const rule = fees?.free || FEES_DEFAULT.free;
+  const always = new Set(rule.always || []);
+  const group = entries[0]?.group || '';
+  const oprostivo = entries.filter((e) => !always.has(e.discipline)).length;
+  const free = (rule.groups || '').indexOf(group) >= 0
+    ? Math.min(rule.count || 0, oprostivo)
+    : 0;
+  return { entries: entries.length, free, paid: entries.length - free };
+}
+
+/** Ekipna kotizacija: enbu ima svoju cenu, ostale ekipe zajedničku. */
+export const teamFeeOf = (team, fees) =>
+  (team?.discipline === 'Enbu' ? (fees?.enbu || 0) : (fees?.team || 0));
 
 /** Rangovi takmičenja — biraju se pri kreiranju novog. */
 export const COMPETITION_LEVELS = [
@@ -141,7 +238,26 @@ export const CALENDARS = [
 export const calendarOf = (competition) =>
   (competition?.calendar === 'B' ? 'B' : 'A');
 
-export const scoresPoints = (competition) => calendarOf(competition) === 'A';
+/**
+ * Da li bodovi sa tog takmičenja teku u trajnu evidenciju.
+ *
+ * Dva uslova, i oba su ista odluka posmatrana sa dve strane: takmičenje mora
+ * da bude **na A listi** i mora da bude **zatvoreno**. Dok traje, plasman se
+ * unosi i medalja se broji kao i svuda — ali bodovi stoje, jer se do
+ * poslednje kategorije još sve može ispraviti. Zatvaranje takmičenja je
+ * trenutak knjiženja.
+ */
+export const pointsCounted = (competition) =>
+  calendarOf(competition) === 'A' && competition?.status === 'Završeno';
+
+/**
+ * Dok su prijave otvorene, spisak takmičara se menja i dopunjuje; od
+ * „Prijave zatvorene" nadalje je zamrznut, pa je ono što je odštampano i ono
+ * što je u bazi ista stvar. Vraćanjem prijava se opet otključava.
+ */
+export const ENTRIES_OPEN = ['Nacrt', 'Prijave otvorene'];
+export const entriesOpen = (competition) =>
+  ENTRIES_OPEN.indexOf(competition?.status || 'Nacrt') >= 0;
 
 export const MONTHS = [
   'januar', 'februar', 'mart', 'april', 'maj', 'jun',
@@ -258,7 +374,7 @@ export function yearsLabel(age, season = SEASON()) {
 export const DISCIPLINES = [
   // ── Tradicionalne ────────────────────────────────────────────────────
   { name: 'Kate',                 kind: 'P/E', system: 'Eliminacija po nivoima',   drawBy: 'level',  groups: 'ABCDEFGHIJ', order: 1 },
-  { name: 'Kihon u mestu',        kind: 'P',   system: 'Bodovanje (flag system)',  drawBy: null,     groups: 'A',          order: 2, note: 'samo 9. i 8. kyu' },
+  { name: 'Kihon u mestu',        kind: 'P',   system: 'Bodovanje (flag system)',  drawBy: null,     groups: 'A',          order: 2, note: 'samo 9. i 8. kyu', openPlacements: true },
   { name: 'Kihon kumite',         kind: 'P',   system: 'Bodovanje (flag system)',  drawBy: null,     groups: 'ABCD',       order: 3 },
   { name: 'Kihon ippon kumite',   kind: 'P',   system: 'Bodovanje (flag system)',  drawBy: null,     groups: 'AB',         order: 4 },
   { name: 'Jiu ippon kumite',     kind: 'P',   system: 'Bodovanje (flag system)',  drawBy: null,     groups: 'CD',         order: 5 },
@@ -277,7 +393,7 @@ export const DISCIPLINES = [
   { name: 'Kumite',               kind: 'P',   system: 'Eliminacija sa repasažom', drawBy: null,     groups: 'GHIJ',       order: 11 },
   { name: 'Kumite tim',           kind: 'E',   system: 'Eliminacija sa repasažom', drawBy: null,     groups: 'GHI',        order: 12, team: { min: 3, max: 4 } },
   { name: 'Tsumeai',              kind: 'P',   system: 'Direktna eliminacija',     drawBy: null,     groups: 'HIJ',        order: 13 },
-  { name: 'Tamashiwari',          kind: 'P',   system: 'Bodovanje (merenje)',      drawBy: null,     groups: 'GHIJ',       order: 14 },
+  { name: 'Tamashiwari',          kind: 'P',   system: 'Bodovanje (merenje)',      drawBy: null,     groups: 'GHIJ',       order: 14, openPlacements: true },
   { name: 'Kobudo',               kind: 'P',   system: 'Bodovanje (flag system)',  drawBy: null,     groups: 'FGHIJ',      order: 15 },
 
   // ── Fudokan sport ────────────────────────────────────────────────────
@@ -385,6 +501,29 @@ export const levelOfBelt = (belt) => {
 /** Disciplines an age group may enter. */
 export const disciplinesForGroup = (code) =>
   DISCIPLINES.filter((d) => d.groups.indexOf(code) >= 0);
+
+/**
+ * Ime kako se piše, bez obzira kako je otkucano.
+ *
+ * Klubovi kucaju kako stignu — „MARKO MARKOVIĆ", „marko marković", „Marko
+ * MARKOVIĆ". Na papiru to izgleda kao tri različita čoveka, pa se svako ime
+ * pre upisa svodi na isti oblik: **veliko samo prvo slovo svakog dela**, i
+ * posle crtice u prezimenu („Marić-Petrović").
+ *
+ * Domaća azbuka se poštuje kroz `toLocaleUpperCase('sr')` — inače „đ" ne bi
+ * postalo „Đ". Dvoslovi ostaju kako treba sami od sebe: uvećava se samo prvo
+ * slovo, pa je „njegoš" → „Njegoš", a ne „NJegoš".
+ *
+ * Ovo **ne rešava dvostruki upis** — lice se i tako prepoznaje bez obzira na
+ * veličinu slova (`identityOf` poredi mala slova). Rešava kako ime izgleda na
+ * spisku, diplomi i računu.
+ */
+export const properName = (value) => String(value ?? '')
+  .trim()
+  .replace(/\s+/g, ' ')
+  .toLocaleLowerCase('sr')
+  .replace(/(^|[\s'\u2019-])(\p{L})/gu,
+    (match, before, letter) => before + letter.toLocaleUpperCase('sr'));
 
 /** Serbian-aware surname sort key (entries print "po klubu, pa po prezimenu"). */
 export const surnameOf = (fullName) => fullName.slice(fullName.lastIndexOf(' ') + 1);

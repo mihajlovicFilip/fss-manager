@@ -26,7 +26,7 @@
 
 import {
   BELTS, WEIGHTS, DISCIPLINES,
-  ageByCode, disciplineByName, groupOfYear, levelOfBelt, teamVariants, SEASON,
+  ageByCode, disciplineByName, groupOfYear, levelOfBelt, teamVariants, SEASON, properName,
 } from './data.js';
 import { readWorkbook } from './xlsx.js';
 
@@ -208,7 +208,7 @@ function readSolo(rows, season) {
       }
 
       line.competitor = {
-        name: tidy(row[cIme]), sex, year, group, belt, level: levelOfBelt(belt),
+        name: properName(row[cIme]), sex, year, group, belt, level: levelOfBelt(belt),
         disciplines: disciplines.map((d) => ({
           name: d.name, weight: d.drawBy === 'weight' ? weight : null,
         })),
@@ -288,7 +288,9 @@ function readTeams(rows, season) {
         if (bad) return bad;
         const sex = readSex(row[m.pol]);
         if (!sex) return `članu „${who}" nije unet pol`;
-        people.push({ name: who, sex, year, group: groupOfYear(year, season) });
+        // I član ekipe se upisuje u pisanom obliku — inače isti čovek stoji
+        // jednako u spisku pojedinačnih a drugačije u ekipi.
+        people.push({ name: properName(who), sex, year, group: groupOfYear(year, season) });
       }
 
       if (!people.length) return 'ekipi nije unet nijedan član';

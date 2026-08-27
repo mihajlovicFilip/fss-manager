@@ -1,13 +1,21 @@
 /**
  * Service worker — makes the app open and print with no network at all.
  *
- * Everything is precached on install and served cache-first afterwards, so a
- * laptop carried into a sports hall behaves exactly as it did in the office.
- * Bump CACHE when any file below changes; the old cache is deleted on
- * activate, so a stale sheet can never outlive a release.
+ * Everything is precached on install. Serving is **network-first with a cache
+ * fallback**, which for this application is the only sane order: the server is
+ * always on localhost, so "network" costs nothing and the browser can never
+ * show yesterday's build. When the server is not running — the genuinely
+ * offline case — the cache answers instead.
+ *
+ * It used to be cache-first, and that produced the worst possible failure: the
+ * folder on disk was current while the browser kept serving an older release,
+ * with no visible sign of it. Hence also the version marker in the navigation.
+ *
+ * Bump CACHE whenever any file below changes; the old cache is deleted on
+ * activate.
  */
 
-const CACHE = 'fss-manager-v41';
+const CACHE = 'fss-manager-v60';
 
 const SHELL = [
   './',
@@ -65,16 +73,30 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
 
-  // Navigations fall back to the cached shell, so a deep link or a reload
-  // offline still opens the app instead of the browser's error page.
-  if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request).catch(() => caches.match('index.html', { ignoreSearch: true }))
-    );
-    return;
-  }
+  // `cache: 'reload'` zaobilazi keš pregledača. Bez toga service worker ume
+  // da dobije staru kopiju iz njega i da je pošteno sačuva kao „poslednje
+  // viđeno" — pa se stara verzija drži i kad je server odavno nova.
+  // Navigacija se izuzima: zahtev za stranu ne sme da se preslaže sa drugim
+  // podešavanjima, pregledač na to odgovara greškom.
+  const fresh = request.mode !== 'navigate'
+    && new URL(request.url).origin === self.location.origin
+    ? fetch(request, { cache: 'reload' }) : fetch(request);
 
   event.respondWith(
-    caches.match(request, { ignoreSearch: true }).then((hit) => hit || fetch(request))
+    fresh
+      .then((response) => {
+        // Što je viđeno, to je i sačuvano — keš tako uvek drži poslednje
+        // stanje, a ne ono od instalacije.
+        if (response.ok && new URL(request.url).origin === self.location.origin) {
+          const copy = response.clone();
+          caches.open(CACHE).then((cache) => cache.put(request, copy));
+        }
+        return response;
+      })
+      .catch(() => caches.match(request, { ignoreSearch: true }).then((hit) => hit
+        // Deep link ili osvežavanje bez servera i dalje otvara aplikaciju,
+        // umesto stranice o grešci.
+        || (request.mode === 'navigate'
+          ? caches.match('index.html', { ignoreSearch: true }) : undefined)))
   );
 });

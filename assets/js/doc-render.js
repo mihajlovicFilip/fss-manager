@@ -35,30 +35,9 @@ export const cell = (value, align = 'left', strong = false) => ({ value, align, 
 
 export const col = (label, width = null, align = 'left') => ({ label, width, align });
 
-/**
- * A block cell — a heading with a wrapped list under it, instead of one line
- * of text. This is what the tatami schedule is made of: „GRUPA A (dečaci)"
- * and then the disciplines that run there.
- *
- * The list is run-in and wrapped rather than one line per item: a mat with
- * ten disciplines would otherwise make a cell taller than the sheet, and
- * this is the shape the federation's own schedule already uses.
- */
-export const block = (head, items = [], note = '') => ({
-  align: 'left', strong: false, value: { head, items, note },
-});
-
 const cellHtml = (c) => {
   const classes = ['is-' + c.align];
   if (c.strong) classes.push('is-strong');
-  if (c.value && typeof c.value === 'object') {
-    const { head, items, note } = c.value;
-    return `<td class="${classes.join(' ')} is-block">
-      <div class="doc-block-head">${esc(head)}</div>${note ? `
-      <div class="doc-block-note">${esc(note)}</div>` : ''}${items.length ? `
-      <div class="doc-block-list">${items.map(esc).join(' · ')}</div>` : ''}
-    </td>`;
-  }
   const text = c.value === null ? '' : (c.value === '' || c.value === undefined) ? '—' : c.value;
   return `<td class="${classes.join(' ')}">${esc(text)}</td>`;
 };
@@ -204,7 +183,7 @@ function balanceTail(pages, heightOf, space) {
  *                            page number/total, printedAt
  */
 export function renderPage(spec, rows, { context, number, total, printedAt, isLast, probe = false }) {
-  const head = spec.columns.map((c) => {
+  const head = (spec.columns || []).map((c) => {
     const style = c.width ? ` style="width:${c.width}"` : '';
     return `<th class="is-${c.align}"${style}>${esc(c.label)}</th>`;
   }).join('');
@@ -463,10 +442,261 @@ export function measure(spec, { context, printedAt, orientation }) {
   };
 }
 
-/**
- * Measures, paginates and writes a whole document into a <doc-page> host.
- * Returns the page count so the caller can label it.
+/* ── Tabla ────────────────────────────────────────────────────────────── */
+
+/*
+ * Tabla je raspored po borilištima: **kolona po borilištu, kartica po
+ * nastupu**.
+ *
+ * Tabela to ne ume. U njoj je red vodoravna celina, pa mora da bude visok
+ * koliko i njegova najviša ćelija — raspored u kom jedno borilište ima
+ * šesnaest stavki a ostala po šest zato ispadne tri lista, od kojih su dva
+ * gotovo prazna. Tabla umesto reda ima kolonu koja teče sama za sebe:
+ * kartica se stavlja tamo gde ima mesta, a ne u red koji čeka najdužu
+ * kolonu, pa isti raspored stane na jedan list.
+ *
+ * Prelama se po kolonama: kad se strana napuni, kolona se nastavlja na
+ * sledećoj, ispod istog zaglavlja. Prelom se, kao i kod tabele, računa iz
+ * izmerene visine, a ne iz procene.
  */
+
+/** Jedna kartica: redni broj nastupa, naslov i spisak pod njim. */
+export const boardCard = (order, head, items = []) => ({ order, head, items });
+
+const boardCardHtml = (card) => `
+          <div class="board-card">
+            <div class="board-card-head">${card.order
+    ? `<span class="board-card-no">${esc(card.order)}.</span>` : ''}${esc(card.head)}</div>${card.items.length ? `
+            <div class="board-card-list">${card.items.map(esc).join(' · ')}</div>` : ''}
+          </div>`;
+
+/** Jedna strana table: zaglavlja svih kolona i kartice koje su na nju stale. */
+function boardPageHtml(board, slices, scale = 1) {
+  return `
+      <div class="board" style="--board-cols:${board.columns.length};--board-scale:${scale}">${board.columns.map((column, i) => `
+        <div class="board-col">
+          <div class="board-head">${esc(column.label)}</div>${(slices[i] || []).map(boardCardHtml).join('')}
+        </div>`).join('')}
+      </div>`;
+}
+
+/**
+ * Meri tablu: koliko visine kolona ima na raspolaganju i kolika je svaka
+ * kartica. Cela tabla se za to jednom položi van ekrana, na pravoj širini
+ * lista — kartica prelomljena na dva reda visoka je dvostruko, a to se ne
+ * može znati unapred.
+ */
+function measureBoard(spec, { context, printedAt, orientation, scale = 1 }) {
+  const host = ensureMeasureHost();
+  const size = PAGE_SIZE[orientation] || PAGE_SIZE.portrait;
+  host.style.width = size.width;
+  const all = spec.board.columns.map((column) => column.cards);
+  host.innerHTML = renderPage({ ...spec, columns: [], lead: boardPageHtml(spec.board, all, scale) }, [], {
+    context, number: 1, total: 1, printedAt, isLast: true, probe: true,
+  });
+
+  const page = host.querySelector('.page');
+  const board = page.querySelector('.board');
+  const boardTop = board.getBoundingClientRect().top - page.getBoundingClientRect().top;
+  const footHeight = page.querySelector('.doc-foot').getBoundingClientRect().height;
+  const summary = page.querySelector('.doc-summary');
+  const summaryHeight = summary
+    ? summary.getBoundingClientRect().height + parseFloat(getComputedStyle(summary).marginTop)
+    : 0;
+  const box = toPx(size.height, host);
+  const bottom = parseFloat(getComputedStyle(page).paddingBottom);
+
+  const columns = [...board.querySelectorAll('.board-col')];
+  const gap = parseFloat(getComputedStyle(columns[0] || board).rowGap) || 0;
+  // Zaglavlje kolone se ponavlja na svakoj strani, pa ga jednom oduzmemo od
+  // raspoložive visine umesto da ga svaki put računamo.
+  const headHeight = Math.max(0, ...columns.map(
+    (c) => c.querySelector('.board-head')?.getBoundingClientRect().height || 0,
+  ));
+  const heights = columns.map((c) => [...c.querySelectorAll('.board-card')]
+    .map((el) => el.getBoundingClientRect().height));
+
+  host.innerHTML = '';
+  return {
+    heights,
+    gap,
+    space: box - boardTop - bottom - footHeight - summaryHeight - headHeight - gap,
+  };
+}
+
+/** Kartice po stranama — svaka kolona se puni za sebe. */
+function paginateBoard(board, { heights, gap, space }) {
+  const pages = [];
+  const pageAt = (i) => {
+    if (!pages[i]) pages[i] = board.columns.map(() => []);
+    return pages[i];
+  };
+
+  board.columns.forEach((column, c) => {
+    let page = 0;
+    let used = 0;
+    column.cards.forEach((card, i) => {
+      const height = heights[c]?.[i] || 0;
+      const need = used ? used + gap + height : height;
+      // Kartica viša od lista ostaje cela na svojoj strani — nema šta da se
+      // preseče na pola.
+      if (used && need > space) { page += 1; used = height; } else { used = need; }
+      pageAt(page)[c].push(card);
+    });
+  });
+
+  return pages.length ? pages : [board.columns.map(() => [])];
+}
+
+/**
+ * Bira kako će tabla na papir: prvo položaj lista, pa veličinu sloga.
+ *
+ * Traži se **jedan list**, sa najvećim slovom koje na njega staje. Uspravan
+ * list je viši, pa kolonu sa mnogo kartica često primi tamo gde ga položen
+ * ne bi — zato se oba probaju, tim redom koji raspored zatraži. Smanjuje se
+ * tek kad nijedan položaj ne pomogne, i to samo do granice ispod koje se
+ * spisak na zidu više ne bi pročitao.
+ */
+const BOARD_SCALES = [1, 0.94, 0.88, 0.82];
+
+function fitBoard(spec, { context, printedAt, orientation, pinned }) {
+  const wanted = !pinned && spec.board.orientations?.length
+    ? spec.board.orientations
+    : [orientation];
+  let best = null;
+  for (const scale of BOARD_SCALES) {
+    for (const side of wanted) {
+      const pages = paginateBoard(
+        spec.board,
+        measureBoard(spec, { context, printedAt, orientation: side, scale }),
+      );
+      if (pages.length === 1) return { pages, orientation: side, scale };
+      if (!best || pages.length < best.pages.length) best = { pages, orientation: side, scale };
+    }
+  }
+  return best;
+}
+
+function renderBoard(spec, board, { pages, scale }, { context, total, printedAt, offset }) {
+  return pages.map((slices, i) => renderPage({
+    ...spec,
+    columns: [],
+    lead: boardPageHtml(board, slices, scale),
+    foot: null,
+  }, [], {
+    context, number: offset + i + 1, total, printedAt, isLast: i === pages.length - 1,
+  })).join('');
+}
+
+/* ── Upis na već odštampan papir ──────────────────────────────────────── */
+
+/*
+ * Diploma je **tuđi papir**. Odštampana je unapred, u tiražu, sa gotovim
+ * tekstom i praznim linijama; posle takmičenja se u te linije upisuje ko je
+ * šta osvojio. Aplikacija tu ne crta dokument nego pogađa mesto — zato list
+ * ovde nema ni zaglavlje, ni naslov, ni podnožje, ni margine: samo tekst,
+ * na milimetar tamo gde je urednik izmerio da na diplomi ima mesta.
+ *
+ * Milimetri se broje od ivice lista, a ne od ivice otiska, jer je to jedino
+ * što se na diplomi može izmeriti lenjirom. Koliko od toga štampač zaista
+ * može da otisne razlikuje se od uređaja do uređaja — zbog toga postoji
+ * probni list, a ne zbog nesigurnosti u računicu.
+ */
+
+/** Jedan red upisa: šta piše i gde stoji. */
+export const slipLine = (text, { top, x = 0, size, caps = false, strong = false }) =>
+  ({ text, top, x, size, caps, strong });
+
+/**
+ * Koliko je koji red širok.
+ *
+ * Dva upisa umeju da stoje na istoj visini — „1. mesto" levo, disciplina
+ * desno, jer diploma tako i piše: „осваја ___ место у дисциплини ___". Da
+ * dugo ime discipline ne bi prešlo preko mesta, red se drži unutar polovine
+ * razmaka do suseda na istoj visini; što ne stane, prelama se naniže umesto
+ * da se pruži postrance.
+ */
+function slipWidths(lines, width) {
+  const half = width / 2 - 8;
+  const rows = new Map();
+  lines.forEach((line) => {
+    const key = Math.round(line.top * 2);
+    if (!rows.has(key)) rows.set(key, []);
+    rows.get(key).push(line);
+  });
+
+  const reach = new Map();
+  rows.forEach((group) => {
+    const sorted = [...group].sort((a, b) => a.x - b.x);
+    sorted.forEach((line, i) => {
+      const left = i ? (line.x + sorted[i - 1].x) / 2 : -half;
+      const right = i < sorted.length - 1 ? (line.x + sorted[i + 1].x) / 2 : half;
+      reach.set(line, Math.max(8, Math.min(line.x - left, right - line.x)));
+    });
+  });
+  return reach;
+}
+
+function slipLineHtml(line, reach) {
+  const style = [
+    `top:${line.top}mm`,
+    `left:calc(50% + ${line.x - reach}mm)`,
+    `width:${reach * 2}mm`,
+    `font-size:${line.size}pt`,
+  ].join(';');
+  const classes = ['slip-line'];
+  if (line.caps) classes.push('is-caps');
+  if (line.strong) classes.push('is-strong');
+  return `
+      <div class="${classes.join(' ')}" style="${style}">${esc(line.text)}</div>`;
+}
+
+/**
+ * Lenjir na probnom listu.
+ *
+ * Uz obe ivice ide skala u milimetrima od gornje ivice, a preko sredine
+ * uspravna linija sa skalom levo i desno od nje — tačno tri mere koje
+ * podešavanje traži. Probni list se štampa na običan papir i prisloni uz
+ * diplomu prema svetlu; ono što se sa lenjira pročita upisuje se u polja.
+ */
+function slipRulerHtml({ width, height }) {
+  const parts = [];
+  for (let mm = 5; mm < height; mm += 5) {
+    const ten = mm % 10 === 0;
+    parts.push(`
+      <div class="slip-tick is-left${ten ? ' is-ten' : ''}" style="top:${mm}mm"></div>
+      <div class="slip-tick is-right${ten ? ' is-ten' : ''}" style="top:${mm}mm"></div>`);
+    if (mm % 20 === 0) {
+      parts.push(`
+      <div class="slip-mm is-left" style="top:${mm}mm">${mm}</div>
+      <div class="slip-mm is-right" style="top:${mm}mm">${mm}</div>`);
+    }
+  }
+
+  const reach = Math.floor((width / 2 - 12) / 10) * 10;
+  for (let mm = -reach; mm <= reach; mm += 10) {
+    parts.push(`
+      <div class="slip-col${mm === 0 ? ' is-mid' : ''}" style="left:calc(50% + ${mm}mm)"></div>
+      <div class="slip-col-mm" style="left:calc(50% + ${mm}mm)">${mm > 0 ? '+' : ''}${mm}</div>`);
+  }
+
+  return `
+      <div class="slip-ruler">${parts.join('')}
+      </div>`;
+}
+
+/** Jedan list po diplomi — bez numeracije, jer je papir već sam svoj. */
+function renderSlips(spec) {
+  return spec.slips.map((slip) => {
+    const reach = slipWidths(slip.lines, slip.size?.width || 210);
+    return `
+    <section class="page is-slip">${slip.ruler ? slipRulerHtml(slip.ruler) : ''}${
+  slip.lines.map((line) => slipLineHtml(line, reach.get(line))).join('')}${slip.note ? `
+      <div class="slip-note">${esc(slip.note)}</div>` : ''}
+    </section>`;
+  }).join('');
+}
+
 /**
  * Uvodne strane — sve što nije tabela: grana žreba, naslovna, šta god.
  *
@@ -491,25 +721,52 @@ function renderLeads(spec, leads, { context, total, printedAt, offset = 0 }) {
   })).join('');
 }
 
-export function renderInto(sheet, spec, { context, orientation = 'portrait', printedAt = stamp() }) {
-  spec.rows.forEach((row, i) => { row.index = i; });
-  sheet.setAttribute('orientation', orientation);
+/**
+ * Jedan dokument u HTML: uvodne strane, pa tabla, pa tabela — u tom redu, sa
+ * numeracijom koja teče kroz sve tri, jer je to **jedan dokument**.
+ */
+function renderDocument(spec, { context, printedAt, orientation, pinned = false }) {
+  const rows = spec.rows || [];
+  rows.forEach((row, i) => { row.index = i; });
 
   const leads = spec.leads || [];
-  const { heights, space } = measure(spec, { context, printedAt, orientation });
-  const chunks = spec.rows.length ? paginate(spec.rows, heights, space) : [];
-  const total = leads.length + chunks.length;
+  const slips = spec.slips || [];
+  const board = spec.board
+    ? fitBoard(spec, { context, printedAt, orientation, pinned })
+    : null;
+  // Tabla sama bira položaj lista; ostatak dokumenta ide za njom, jer je
+  // <doc-page> jedan format papira za ceo štos.
+  const side = board?.orientation || orientation;
 
-  sheet.innerHTML = renderLeads(spec, leads, { context, total, printedAt })
-    + chunks.map((rows, i) => renderPage(spec, rows, {
+  let chunks = [];
+  if (rows.length) {
+    const { heights, space } = measure(spec, { context, printedAt, orientation: side });
+    chunks = paginate(rows, heights, space);
+  }
+
+  const boardPages = board ? board.pages.length : 0;
+  const total = leads.length + boardPages + slips.length + chunks.length;
+  const html = renderLeads(spec, leads, { context, total, printedAt })
+    + (board
+      ? renderBoard(spec, spec.board, board, { context, total, printedAt, offset: leads.length })
+      : '')
+    + (slips.length ? renderSlips(spec) : '')
+    + chunks.map((slice, i) => renderPage(spec, slice, {
       context,
-      number: leads.length + i + 1,
+      number: leads.length + boardPages + slips.length + i + 1,
       total,
       printedAt,
       isLast: i === chunks.length - 1,
     })).join('');
 
-  return total;
+  return { html, total, orientation: side };
+}
+
+export function renderInto(sheet, spec, { context, orientation = 'portrait', printedAt = stamp() }) {
+  const out = renderDocument(spec, { context, printedAt, orientation });
+  sheet.setAttribute('orientation', out.orientation);
+  sheet.innerHTML = out.html;
+  return out.total;
 }
 
 /**
@@ -528,26 +785,20 @@ export function renderInto(sheet, spec, { context, orientation = 'portrait', pri
  * @returns {{documents:number, pages:number}}
  */
 export function renderAllInto(sheet, jobs, { orientation = 'portrait', printedAt = stamp() } = {}) {
-  const usable = jobs.filter((job) => job.spec?.rows?.length || job.spec?.leads?.length);
+  const usable = jobs.filter(
+    (job) => job.spec?.rows?.length || job.spec?.leads?.length
+      || job.spec?.board || job.spec?.slips?.length,
+  );
   sheet.setAttribute('orientation', orientation);
 
   let html = '';
   let pages = 0;
   usable.forEach(({ spec, context }) => {
-    spec.rows.forEach((row, i) => { row.index = i; });
-    const leads = spec.leads || [];
-    const { heights, space } = measure(spec, { context, printedAt, orientation });
-    const chunks = spec.rows.length ? paginate(spec.rows, heights, space) : [];
-    const total = leads.length + chunks.length;
-    pages += total;
-    html += renderLeads(spec, leads, { context, total, printedAt })
-      + chunks.map((rows, i) => renderPage(spec, rows, {
-        context,
-        number: leads.length + i + 1,
-        total,
-        printedAt,
-        isLast: i === chunks.length - 1,
-      })).join('');
+    // Štos je jedan format papira od početka do kraja — dokument u njemu ne
+    // sme sam da okrene list.
+    const out = renderDocument(spec, { context, printedAt, orientation, pinned: true });
+    html += out.html;
+    pages += out.total;
   });
 
   sheet.innerHTML = html;

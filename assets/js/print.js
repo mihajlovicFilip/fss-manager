@@ -72,7 +72,7 @@ function prepare() {
   // grane izađe ekran.
   if (stacked) return true;
   const job = builder?.();
-  if (!job || !(job.spec?.rows?.length || job.spec?.leads?.length)) {
+  if (!job || !(job.spec?.rows?.length || job.spec?.leads?.length || job.spec?.board)) {
     // Ekran bez svog builder-a, a na listu ipak nešto stoji: to je štos koji
     // je neko upravo pripremio. Ostavi ga.
     if (!sheet?.firstElementChild) document.body.classList.remove('is-printing');

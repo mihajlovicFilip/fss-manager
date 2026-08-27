@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kontrolna tabla · Fudokan savez Srbije</title>
 <meta name="theme-color" content="#5980a6">
+<!-- Ime keša koje ova strana očekuje; mora u korak sa CACHE u sw.js. -->
+<meta name="app-cache" content="fss-manager-v60">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="assets/icons/favicon-64.png" sizes="64x64" type="image/png">
 <link rel="icon" href="assets/icons/icon-192.png" sizes="192x192" type="image/png">
@@ -37,11 +39,41 @@
       // inače osvežen folder ume da danima služi staru verziju. update()
       // pri svakom otvaranju natera proveru odmah, a ne kad pregledaču
       // padne na pamet.
+      // Prvo provera: da li keš koji stoji u pregledaču pripada ovoj verziji.
+      //
+      // Sama strana uvek stiže sveža sa servera, pa je ono što u njoj piše
+      // merodavno. Ako u keš skladištu nema kešа sa tim imenom, znači da tu
+      // stoji nešto starije — i to se briše zajedno sa service worker-om, pa
+      // se strana jednom osveži. Bez ovoga stara verzija ume da se drži
+      // danima, a sa strane se to vidi samo po oznaci verzije u dnu.
+      const wantedCache = document.querySelector('meta[name="app-cache"]')?.content;
+      if (wantedCache && window.caches) {
+        caches.keys().then(async (keys) => {
+          if (!keys.length || keys.includes(wantedCache)) return;
+          console.warn('Zatečen stariji keš (' + keys.join(', ') + ') — čistim ga.');
+          await Promise.all(keys.map((k) => caches.delete(k)));
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map((r) => r.unregister()));
+          location.reload();
+        }).catch(() => { /* bez keša nema ni šta da se čisti */ });
+      }
+
       navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
         .then((reg) => reg.update())
         .catch((err) => {
           console.warn('Offline keš nije registrovan:', err.message);
         });
+
+      // Kad nova verzija preuzme, strana se **jednom** osveži. Bez ovoga
+      // pregledač do sledećeg otvaranja i dalje prikazuje staru aplikaciju,
+      // iako je nova već instalirana — a to se sa strane vidi samo po oznaci
+      // verzije u dnu navigacije.
+      let reloaded = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (reloaded) return;
+        reloaded = true;
+        location.reload();
+      });
     });
   }
 </script>

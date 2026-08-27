@@ -13,11 +13,12 @@
 import {
   FEDERATION, DISCIPLINES, COMPETITION_LEVELS, PLACEMENTS, CALENDARS, MONTHS, APP_VERSION, AGES,
   categoryKey, disciplinesForGroup, disciplineByName, dateLabel, ageByCode, clubByName,
-  placementByKey, pointsFor, calendarOf, teamCategoryLabel, teamSizeLabel,
-  seasonOf, yearsLabel,
+  placementByKey, placementSlots, pointsFor, calendarOf, teamCategoryLabel, teamSizeLabel,
+  seasonOf, yearsLabel, DIPLOMA_LINES, DIPLOMA_DEFAULT, entriesOpen, pointsCounted,
+  BELTS, CLUBS, WEIGHTS, groupOfYear, levelOfBelt, FEES_DEFAULT,
 } from './data.js';
 import { store } from './store.js';
-import { cell, col, block, uniqueCount, bracketHtml } from './doc-render.js';
+import { cell, col, boardCard, slipLine, uniqueCount, bracketHtml } from './doc-render.js';
 import { drawCategory, MAX_BRACKET } from './draw.js';
 import { setPrintable, printNow, printStack, visibleIds, onScreen, filterLabel } from './print.js';
 import { readEntryFile } from './import.js';
@@ -76,6 +77,9 @@ const SCREENS = [
 
   { id: 'rezultati', label: 'Rezultati', view: 'results', title: 'Rezultati' },
 
+  { id: 'diplome', label: 'Diplome', view: 'diplomas',
+    kicker: () => 'Upis na odštampane diplome', title: 'Diplome' },
+
   { id: 'rang', label: 'Rang lista', view: 'rankings',
     kicker: () => 'Bodovanje kroz sezonu', title: 'Rang lista' },
 
@@ -85,12 +89,13 @@ const SCREENS = [
 
   { id: 'dokumenti', label: 'Dokumenti', href: 'documents.html' },
 
-  { id: 'podesavanja', title: 'Podešavanja',
-    note: 'Discipline, uzrasne grupe, telesne težine i pravila takmičenja — sve ono što danas stoji kao pravilnik u data.js.' },
+  { id: 'podesavanja', label: 'Podešavanja', view: 'settings',
+    kicker: () => 'Cenovnik i pravila', title: 'Podešavanja' },
 ];
 
 const NAV_MAIN = ['kontrolna-tabla', 'takmicenja', 'uvoz', 'takmicari',
-  'kategorije', 'klubovi', 'zreb', 'tatami', 'rezultati', 'rang', 'kalendar', 'dokumenti'];
+  'kategorije', 'klubovi', 'zreb', 'tatami', 'rezultati', 'diplome', 'rang',
+  'kalendar', 'dokumenti'];
 
 const screenById = (id) => SCREENS.find((s) => s.id === id);
 
@@ -133,7 +138,6 @@ function checks(registry) {
   if (singles) {
     found.push({
       title: `${singles} ${plural(singles, 'kategorija', 'kategorije', 'kategorija')} sa jednim takmičarem`,
-      note: 'Razmotriti spajanje pre generisanja žreba.',
       action: 'Pregled kategorija →', go: 'kategorije',
     });
   }
@@ -143,7 +147,6 @@ function checks(registry) {
   if (noWeight.length) {
     found.push({
       title: `${noWeight.length} ${plural(noWeight.length, 'prijava', 'prijave', 'prijava')} bez telesne težine`,
-      note: 'Kumite se izvlači po telesnoj težini — bez nje prijava ne može ući u kategoriju.',
       action: 'Otvori takmičare →', go: 'takmicari',
     });
   }
@@ -153,7 +156,6 @@ function checks(registry) {
   if (illegal.length) {
     found.push({
       title: `${illegal.length} ${plural(illegal.length, 'prijava', 'prijave', 'prijava')} van matrice disciplina`,
-      note: 'Disciplina nije otvorena za uzrasnu grupu takmičara.',
       action: 'Otvori takmičare →', go: 'takmicari',
     });
   }
@@ -193,7 +195,7 @@ function dashboardHtml({ competition, registry, demoStale }) {
     return `
       <div class="empty-screen">
         <h2 class="soon-title">Nema nijednog takmičenja</h2>
-        <p class="soon-note">Kreiraj prvo takmičenje pa se kontrolna tabla puni sama.</p>
+        <p class="soon-note">Nema izabranog takmičenja.</p>
         <div class="soon-links">
           <button type="button" class="btn-app is-primary" data-go="novo-takmicenje">+ Novo takmičenje</button>
         </div>
@@ -211,9 +213,7 @@ function dashboardHtml({ competition, registry, demoStale }) {
   // korisnik već ima svoj rad u njoj, ne dira se — nego se ovde ponudi.
   const stale = demoStale ? {
     title: 'Demo podaci su stariji od aplikacije',
-    note: 'Baza je napunjena ranijom verzijom demoa, pa ne pokazuje ono što '
-      + 'aplikacija sad ume. Vraćanje demoa briše sve iz baze, i tvoja '
-      + 'takmičenja — uradi to samo ako ti podaci u njoj ne trebaju.',
+    note: 'Vraćanje demo podataka briše sve iz baze.',
     action: 'Vrati demo podatke',
     go: 'reset-demo',
   } : null;
@@ -221,14 +221,14 @@ function dashboardHtml({ competition, registry, demoStale }) {
   const found = [...(stale ? [stale] : []),
     ...(registry.entries.length ? checks(registry) : [])];
   const checkList = registry.entries.length === 0 && !stale
-    ? '<div class="empty">Još nema nijedne prijave — provere kreću sa prvim uvozom.</div>'
+    ? '<div class="empty">Nema nijedne prijave.</div>'
     : (found.length ? found.map((c) => `
       <div class="check">
         <div class="check-title">${esc(c.title)}</div>
         <div class="check-note">${esc(c.note)}</div>
         <button type="button" class="check-action" data-go="${esc(c.go)}">${esc(c.action)}</button>
       </div>`).join('')
-      : '<div class="empty">Sve provere prolaze — nema prijava koje traže ispravku.</div>');
+      : '<div class="empty">Sve provere prolaze.</div>');
 
   return `
     <div class="comp-card">
@@ -262,10 +262,7 @@ function dashboardHtml({ competition, registry, demoStale }) {
     <div class="panels">
       <section>
         <div class="panel-title">Poslednja aktivnost</div>
-        <div class="empty">
-          Dnevnik događaja počinje da se puni kad uvoz prijava bude gotov —
-          uvoz, izmene kategorija i štampa upisuju se tada sami.
-        </div>
+        <div class="empty">Dnevnik događaja još nije u upotrebi.</div>
       </section>
       <section>
         <div class="panel-title">Zahteva pažnju</div>
@@ -336,7 +333,7 @@ function competitorsHtml({ competition, registry, tally }) {
     return `
       <div class="empty-screen">
         <h2 class="soon-title">Nema aktuelnog takmičenja</h2>
-        <p class="soon-note">Izaberi ili kreiraj takmičenje pa se spisak puni sam.</p>
+        <p class="soon-note">Nema izabranog takmičenja.</p>
         <div class="soon-links">
           <button type="button" class="btn-app is-primary" data-go="takmicenja">Takmičenja</button>
         </div>
@@ -346,10 +343,12 @@ function competitorsHtml({ competition, registry, tally }) {
     return `
       <div class="empty-screen">
         <h2 class="soon-title">Još nema prijavljenih</h2>
-        <p class="soon-note">
-          Na takmičenju „${esc(competition.name)}" nema nijedne prijave.
-          Kad uvoz iz Excela bude gotov, spisak se puni odatle.
-        </p>
+        <p class="soon-note">Na takmičenju „${esc(competition.name)}" nema nijedne prijave.</p>
+        ${entriesOpen(competition) ? `
+        <div class="soon-links">
+          <button type="button" class="btn-app is-primary" data-new-entry>+ Nova prijava</button>
+          <button type="button" class="btn-app" data-go="uvoz">Uvoz prijava</button>
+        </div>` : ''}
       </div>`;
   }
 
@@ -365,6 +364,13 @@ function competitorsHtml({ competition, registry, tally }) {
     <div class="notice">Takmičenje je na <b>B listi</b> — plasmani i medalje se
     beleže kao i svuda, ali ne nose bodove, pa su kolone „Bodovi" i „Ukupno"
     prazne za ovo takmičenje.</div>` : '';
+
+  // Ispravka prijave ima svoj rok: dok su prijave otvorene. Posle toga se
+  // kolona i ne iscrtava, a napomena kaže gde se rok vraća.
+  const open = entriesOpen(competition);
+  const frozen = open ? '' : `
+    <div class="notice">Prijave su zatvorene — podaci se više ne menjaju.
+    Vrati prijave na kontrolnoj tabli ako treba ispravka.</div>`;
 
   const blank = { zlato: 0, srebro: 0, bronza: 0, ucesce: 0, medalje: 0, bodovi: 0 };
   const rows = [...registry.competitors]
@@ -391,16 +397,19 @@ function competitorsHtml({ competition, registry, tally }) {
         <td class="col-num${here.bronza ? ' is-medal' : ''}">${here.bronza || '·'}</td>
         <td class="col-num">${here.ucesce || '·'}</td>
         <td class="col-num is-strong">${here.bodovi ? num(here.bodovi) : '·'}</td>
-        <td class="col-num is-total" title="${total.competitions || 0} ${plural(total.competitions || 0, 'takmičenje', 'takmičenja', 'takmičenja')}">${total.bodovi ? num(total.bodovi) : '·'}</td>
+        <td class="col-num is-total" title="${total.competitions || 0} ${plural(total.competitions || 0, 'takmičenje', 'takmičenja', 'takmičenja')}">${total.bodovi ? num(total.bodovi) : '·'}</td>${open ? `
+        <td class="col-edit"><button type="button" class="link-cell"
+            data-edit-entry="${esc(c.id)}">Izmeni</button></td>` : ''}
       </tr>`;
     }).join('');
 
   return `
-    ${notice}
+    ${notice}${frozen}
     <div class="list-tools">
       <input class="control search" id="competitor-search" type="search"
              placeholder="Pretraga po imenu ili klubu" aria-label="Pretraga takmičara">
       <span class="list-count" id="competitor-count">${registry.competitors.length} ${plural(registry.competitors.length, 'takmičar', 'takmičara', 'takmičara')}</span>
+      ${open ? '<button type="button" class="btn-app is-quiet" data-new-entry>+ Nova prijava</button>' : ''}
     </div>
     <table class="grid is-dense">
       <thead>
@@ -417,11 +426,221 @@ function competitorsHtml({ competition, registry, tally }) {
           <th class="col-num" title="Bronza — ${PLACEMENTS[2].points} bodova">Bronza</th>
           <th class="col-num" title="Učešće — ${PLACEMENTS[3].points} bodova">Učešće</th>
           <th class="col-num" title="Bodovi na ovom takmičenju">Bodovi</th>
-          <th class="col-num" title="Zbir sa svih takmičenja koja baza pamti">Ukupno</th>
+          <th class="col-num" title="Zbir sa zatvorenih takmičenja koja baza pamti">Ukupno</th>${open ? `
+          <th class="col-edit"><span class="sr-only">Ispravka</span></th>` : ''}
         </tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>`;
+}
+
+/**
+ * Ispravka jedne prijave.
+ *
+ * Klubovi šalju formulare, formulari se uvoze — i tu se s vremena na vreme
+ * nađe pogrešan pol ili promašeno godište. Dok su prijave otvorene, to mora
+ * da se ispravi ovde: posle zatvaranja je spisak zamrznut, jer ono što je
+ * odštampano i ono što je u bazi mora da bude ista stvar.
+ *
+ * Dijalog **ne pušta da se upiše nemoguće**: uzrasna grupa se računa iz
+ * godišta, ponuđene su samo discipline moguće za tu grupu, a telesne težine
+ * samo one koje pravilnik za tu grupu i pol poznaje. Kad se godište ili pol
+ * promeni, ponuda se prekraja pred očima — disciplina koja u novom uzrastu ne
+ * postoji ispada sama, a ne ostane tiho upisana.
+ */
+function editEntryModal({ competition, competitor, entries, isNew = false }) {
+  const season = seasonOf(competition);
+  const years = Array.from({ length: 101 }, (unused, i) => season - i);
+  const picked = new Set(entries.map((e) => e.discipline));
+
+  const clubs = [...new Set(CLUBS.map((c) => c.name).concat(competitor.club || []))]
+    .sort((a, b) => a.localeCompare(b, 'sr'));
+
+  modalRoot.innerHTML = `
+    <div class="backdrop" data-close>
+      <form class="modal is-wide" id="edit-entry-form" novalidate>
+        <i class="mark tl" aria-hidden="true">+</i><i class="mark tr" aria-hidden="true">+</i>
+        <i class="mark bl" aria-hidden="true">+</i><i class="mark br" aria-hidden="true">+</i>
+        <h2 class="modal-title">${isNew ? 'Nova prijava' : 'Ispravka prijave'}</h2>
+
+        <div class="form-grid">
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="e-name">Ime i prezime</label>
+              <input class="control" id="e-name" name="name" value="${esc(competitor.name)}">
+            </div>
+            <div class="field">
+              <label class="field-label" for="e-club">Klub</label>
+              <select class="control" id="e-club" name="club">${clubs.map((c) => `
+                <option value="${esc(c)}"${c === competitor.club ? ' selected' : ''}>${esc(c)}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="e-sex">Pol</label>
+              <select class="control" id="e-sex" name="sex">
+                <option value="M"${competitor.sex === 'M' ? ' selected' : ''}>muški</option>
+                <option value="Ž"${competitor.sex === 'Ž' ? ' selected' : ''}>ženski</option>
+              </select>
+            </div>
+            <div class="field">
+              <label class="field-label" for="e-year">Godište</label>
+              <select class="control" id="e-year" name="year">${years.map((y) => `
+                <option value="${y}"${y === Number(competitor.year) ? ' selected' : ''}>${y}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="e-belt">Pojas</label>
+              <select class="control" id="e-belt" name="belt">${BELTS.map((b) => `
+                <option value="${esc(b)}"${b === competitor.belt ? ' selected' : ''}>${esc(b)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field" id="e-weight-field"></div>
+          </div>
+
+          <div class="field">
+            <span class="field-label">Discipline</span>
+            <div class="picks" id="e-disciplines"></div>
+          </div>
+
+          <p class="modal-note" id="e-derived"></p>
+        </div>
+
+        <p class="form-error" id="e-error" hidden></p>
+
+        <div class="modal-actions" id="e-actions">
+          ${isNew ? '' : '<button type="button" class="btn-app is-danger" id="e-remove">Ukloni prijavu</button>'}
+          <span class="modal-spacer"></span>
+          <button type="button" class="btn-app" data-close>Otkaži</button>
+          <button type="submit" class="btn-app is-primary">${
+  isNew ? 'Upiši prijavu' : 'Sačuvaj ispravku'}</button>
+        </div>
+      </form>
+    </div>`;
+
+  const form = document.getElementById('edit-entry-form');
+  const derived = document.getElementById('e-derived');
+  const box = document.getElementById('e-error');
+
+  /** Sve što zavisi od godišta i pola — prekraja se na svaku njihovu izmenu. */
+  function paint() {
+    const year = Number(form.year.value);
+    const sex = form.sex.value;
+    const group = groupOfYear(year, season);
+    const age = ageByCode(group);
+    const possible = group ? disciplinesForGroup(group).filter((d) => !d.team) : [];
+
+    const chosen = new Set([...form.querySelectorAll('[name="disciplines"]:checked')]
+      .map((input) => input.value));
+    // Prvo iscrtavanje uzima ono što na prijavi stoji; svako sledeće ono što
+    // je čovek u međuvremenu čekirao.
+    const keep = chosen.size || form.dataset.painted ? chosen : picked;
+
+    document.getElementById('e-disciplines').innerHTML = possible.map((d) => `
+      <label class="pick">
+        <input type="checkbox" name="disciplines" value="${esc(d.name)}"${
+  keep.has(d.name) ? ' checked' : ''}>
+        <span>${esc(d.name)}</span>
+      </label>`).join('') || '<span class="modal-note">Za taj uzrast nema nijedne discipline.</span>';
+
+    const allowed = WEIGHTS[group]?.[sex] || [];
+    const wanted = possible.some((d) => d.drawBy === 'weight' && keep.has(d.name));
+    document.getElementById('e-weight-field').innerHTML = allowed.length ? `
+      <label class="field-label" for="e-weight">Telesna težina${wanted ? '' : ' (nije obavezna)'}</label>
+      <select class="control" id="e-weight" name="weight">
+        <option value="">—</option>${allowed.map((w) => `
+        <option value="${esc(w)}"${w === competitor.weight ? ' selected' : ''}>${esc(w)}</option>`).join('')}
+      </select>` : '';
+
+    derived.textContent = group
+      ? `Uzrast: grupa ${group} · ${age.name.toLowerCase()} · ${levelOfBelt(form.belt.value)}`
+      : `Godište ${year} nije obuhvaćeno uzrasnom tabelom.`;
+    form.dataset.painted = '1';
+  }
+
+  paint();
+  form.querySelector('#e-year').addEventListener('change', paint);
+  form.querySelector('#e-sex').addEventListener('change', paint);
+  form.querySelector('#e-belt').addEventListener('change', paint);
+  form.querySelector('#e-disciplines').addEventListener('change', paint);
+  form.querySelector('#e-name').focus();
+
+  const fail = (message) => {
+    box.textContent = message;
+    box.hidden = false;
+  };
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    box.hidden = true;
+    const patch = {
+      name: form.name.value,
+      club: form.club.value,
+      sex: form.sex.value,
+      year: Number(form.year.value),
+      belt: form.belt.value,
+      weight: form.querySelector('#e-weight')?.value || '',
+      disciplines: [...form.querySelectorAll('[name="disciplines"]:checked')]
+        .map((input) => input.value),
+    };
+    const ime = patch.name.trim();
+
+    try {
+      if (isNew) {
+        const done = await store.addCompetitor(competition.id, patch);
+        closeModal();
+        // Poruka se slaže sa polom takmičara — „upisana", ne „upisan".
+        const ona = patch.sex === 'Ž';
+        toast([
+          `${ime} — ${ona ? 'upisana' : 'upisan'}, uzrast ${done.group}`,
+          `${done.entries} ${plural(done.entries, 'disciplina', 'discipline', 'disciplina')}`,
+          done.elsewhere ? 'isto ime i godište postoji pod drugim klubom — upisan kao nov takmičar'
+            : (done.known ? `${ona ? 'prepoznata' : 'prepoznat'} iz ranijih takmičenja` : ''),
+        ].filter(Boolean).join(' · ') + '.');
+      } else {
+        const done = await store.editCompetitor(competition.id, competitor.id, patch);
+        closeModal();
+        toast([
+          `${ime} — ispravljeno, uzrast ${done.group}`,
+          done.added ? `${done.added} ${plural(done.added, 'disciplina dodata', 'discipline dodate', 'disciplina dodato')}` : '',
+          done.removed ? `${done.removed} ${plural(done.removed, 'uklonjena', 'uklonjene', 'uklonjeno')}` : '',
+          done.teams ? `ispravljeno i u ${done.teams} ${plural(done.teams, 'ekipi', 'ekipe', 'ekipa')}` : '',
+          done.merged ? 'spojeno sa licem koje već postoji u bazi' : '',
+        ].filter(Boolean).join(' · ') + '.');
+      }
+      render();
+    } catch (err) {
+      fail(err.message);
+    }
+  });
+
+  document.getElementById('e-remove')?.addEventListener('click', () => {
+    const actions = document.getElementById('e-actions');
+    actions.innerHTML = `
+      <span class="modal-note">Ukloniti ${esc(competitor.name)} sa takmičenja,
+        sa svim disciplinama i ekipama u kojima je član?</span>
+      <span class="modal-spacer"></span>
+      <button type="button" class="btn-app" data-close>Otkaži</button>
+      <button type="button" class="btn-app is-danger" id="e-remove-yes">Ukloni</button>`;
+    document.getElementById('e-remove-yes').addEventListener('click', async () => {
+      try {
+        const done = await store.removeCompetitor(competition.id, competitor.id);
+        closeModal();
+        toast(`${competitor.name} je ${competitor.sex === 'Ž' ? 'uklonjena' : 'uklonjen'} — ${
+          done.entries} ${plural(done.entries, 'prijava', 'prijave', 'prijava')}`
+          + (done.teams ? ` i ${done.teams} ${plural(done.teams, 'ekipa', 'ekipe', 'ekipa')}` : '') + '.');
+        render();
+      } catch (err) {
+        closeModal();
+        toast(err.message);
+      }
+    });
+  });
 }
 
 /**
@@ -527,7 +746,7 @@ function clubsHtml({ clubs }) {
     return `
       <div class="empty-screen">
         <h2 class="soon-title">Nema nijednog kluba</h2>
-        <p class="soon-note">Klubovi se pojavljuju čim stigne prva prijava.</p>
+        <p class="soon-note">Nema nijedne prijave.</p>
       </div>`;
   }
 
@@ -566,10 +785,7 @@ function clubsHtml({ clubs }) {
       </thead>
       <tbody>${rows}</tbody>
     </table>
-    <p class="table-note">
-      Ekipni plasmani se još ne broje — rezultat se za sada upisuje na
-      pojedinačnu prijavu, a ekipe su zaseban zapis bez rezultata.
-    </p>`;
+`;
 }
 
 // ── Rezultati ──────────────────────────────────────────────────────────
@@ -599,7 +815,7 @@ function resultsHtml({ competition, registry, results }) {
     return `
       <div class="empty-screen">
         <h2 class="soon-title">Nema aktuelnog takmičenja</h2>
-        <p class="soon-note">Izaberi takmičenje pa se prijave pojave ovde.</p>
+        <p class="soon-note">Nema izabranog takmičenja.</p>
         <div class="soon-links">
           <button type="button" class="btn-app is-primary" data-go="takmicenja">Takmičenja</button>
         </div>
@@ -609,7 +825,7 @@ function resultsHtml({ competition, registry, results }) {
     return `
       <div class="empty-screen">
         <h2 class="soon-title">Nema prijava</h2>
-        <p class="soon-note">Na takmičenju „${esc(competition.name)}" još nema nijedne prijave.</p>
+        <p class="soon-note">Na takmičenju „${esc(competition.name)}" nema nijedne prijave.</p>
       </div>`;
   }
 
@@ -627,11 +843,7 @@ function resultsHtml({ competition, registry, results }) {
     cats.get(key).push(e);
   });
 
-  const options = (selected) => ['<option value="">— nije uneto —</option>']
-    .concat(PLACEMENTS.map((pl) => `
-      <option value="${esc(pl.key)}"${pl.key === selected ? ' selected' : ''}>${esc(
-        pl.place ? `${pl.place} — ${pl.label.toLowerCase()}` : pl.label)}</option>`))
-    .join('');
+  const options = (selected) => placementOptions(selected, ALL_PLACEMENTS);
 
   const disciplines = [...byDiscipline.entries()]
     .sort((a, b) => (disciplineByName(a[0])?.order || 99) - (disciplineByName(b[0])?.order || 99))
@@ -655,18 +867,20 @@ function resultsHtml({ competition, registry, results }) {
                 <div class="result-meta">${esc(e.club)} · ${esc(e.belt)} pojas</div>
               </div>
               <span class="result-points${pl?.medal ? ' is-medal' : ''}">${pl ? pl.points + ' bodova' : '—'}</span>
-              <select class="control result-pick" data-entry="${esc(e.id)}"${locked ? ' disabled' : ''}
+              <select class="control result-pick" data-entry="${esc(e.id)}"
+                      data-prev="${esc(placement)}"${locked ? ' disabled' : ''}
                       aria-label="Plasman — ${esc(e.name)}">${options(placement)}</select>
             </div>`;
             }).join('');
 
           return `
-        <section class="cat" data-disc="${esc(discipline)}"
+        <section class="cat" data-disc="${esc(discipline)}" data-key="${esc(categoryKey(first))}"
                  data-cat="${esc(categoryLabel(first))}" data-sex="${esc(first.sex)}">
           <div class="cat-head">
             <span class="cat-name">${esc(categoryFullLabel(first))}</span>
             <span class="cat-slots"></span>
             <span class="cat-count">${group.length} ${plural(group.length, 'prijava', 'prijave', 'prijava')}</span>
+            <button type="button" class="btn-app is-quiet" data-print-cat>Štampaj</button>
           </div>
           ${rows}
         </section>`;
@@ -679,6 +893,7 @@ function resultsHtml({ competition, registry, results }) {
           <span class="disc-meta">${cats.size} ${plural(cats.size, 'kategorija', 'kategorije', 'kategorija')} · ${entries.length} ${plural(entries.length, 'prijava', 'prijave', 'prijava')}${
             disciplineByName(discipline)?.note ? ' · ' + esc(disciplineByName(discipline).note) : ''}</span>
           <span class="disc-progress">${done} / ${entries.length}</span>
+          <button type="button" class="btn-app is-quiet" data-print-disc="${esc(discipline)}">Štampaj</button>
         </summary>
         <div class="disc-body">${categories}</div>
       </details>`;
@@ -696,6 +911,10 @@ function resultsHtml({ competition, registry, results }) {
     ${calendarOf(competition) === 'B' ? `<div class="notice">Takmičenje je na
       <b>B listi</b> — plasman se upisuje i medalja se broji, ali bodovi iz njega
       ne ulaze u rang listu.</div>` : ''}
+    ${calendarOf(competition) === 'A' && !pointsCounted(competition) ? `<div class="notice">
+      Bodovi se knjiže kad se takmičenje zatvori. Do tada se plasmani i medalje
+      unose i vide, ali u ukupan zbir, na ekran Klubovi i na rang listu ulaze tek
+      <b>zatvaranjem takmičenja</b> na kontrolnoj tabli.</div>` : ''}
     <div class="filters">
       <label class="filter">
         <span class="filter-label">Disciplina</span>
@@ -723,8 +942,9 @@ function resultsHtml({ competition, registry, results }) {
         </select>
       </label>
       <button type="button" class="btn-app is-quiet" id="f-reset" hidden>Poništi filtere</button>
+      ${!locked && done < registry.entries.length
+    ? '<button type="button" class="btn-app is-quiet" data-fill-ucesce>Svima učešće</button>' : ''}
       <span class="list-count" id="results-progress">${done} od ${registry.entries.length} plasmana uneto</span>
-      <span class="slot-legend">u kategoriji: 1 zlato · 1 srebro · <b>2 bronze</b></span>
     </div>
     <div class="disc-list" id="results-list">${disciplines}</div>`;
 }
@@ -803,12 +1023,31 @@ function categoryFullLabel(entry) {
   return parts.join(' · ');
 }
 
+/** Svi plasmani — meni pre nego što se zna šta je u kategoriji zauzeto. */
+const ALL_PLACEMENTS = new Set(PLACEMENTS.map((pl) => pl.key));
+
 /**
- * Popunjenost medalja u jednoj kategoriji, pročitana iz samih izbora. Kad je
- * neko mesto prekoračeno — dva zlata, tri bronze — kategorija se oboji, jer
- * takav rezultat ne sme da ode na papir.
+ * Meni plasmana za jedan red: prazno, pa ono što je u kategoriji još slobodno.
+ * Sopstveni plasman uvek ostaje u meniju, da se izbor može promeniti ili povući.
+ */
+const placementOptions = (selected, allowed) => ['<option value="">— nije uneto —</option>']
+  .concat(PLACEMENTS.filter((pl) => allowed.has(pl.key) || pl.key === selected).map((pl) => `
+    <option value="${esc(pl.key)}"${pl.key === selected ? ' selected' : ''}>${esc(
+    pl.place ? `${pl.place} — ${pl.label.toLowerCase()}` : pl.label)}</option>`))
+  .join('');
+
+/**
+ * Popunjenost mesta u jednoj kategoriji: prebroji, ispiše i **zaključa**.
+ *
+ * Po pravilniku kategorija ima jedno prvo, jedno drugo i dva treća mesta. Kada
+ * se mesto popuni, ono se u ostalim redovima te kategorije više ne nudi — treće
+ * zlato ne treba prijaviti kao grešku posle unosa, nego ga ne pustiti unutra.
+ *
+ * Discipline koje se mere ili boduju umesto da se izvlače (kihon u mestu,
+ * tamashiwari) nemaju ograničenje, pa im se ni brojač ne ispisuje kao razlomak.
  */
 function updateCategoryState(cat) {
+  const discipline = cat.dataset.disc;
   const picks = [...cat.querySelectorAll('.result-pick')];
   const counts = {};
   picks.forEach((p) => { if (p.value) counts[p.value] = (counts[p.value] || 0) + 1; });
@@ -816,8 +1055,31 @@ function updateCategoryState(cat) {
   let over = false;
   const parts = PLACEMENTS.filter((pl) => pl.slots).map((pl) => {
     const used = counts[pl.key] || 0;
-    if (used > pl.slots) over = true;
-    return `<span class="${used > pl.slots ? 'is-over' : used === pl.slots ? 'is-full' : ''}">${pl.short} ${used}/${pl.slots}</span>`;
+    const slots = placementSlots(discipline, pl.key);
+    if (slots === null) return `<span>${pl.short} ${used}</span>`;
+    if (used > slots) over = true;
+    return `<span class="${used > slots ? 'is-over' : used === slots ? 'is-full' : ''}">${pl.short} ${used}/${slots}</span>`;
+  });
+
+  // Mesto koje su zauzeli drugi redovi **nestaje iz menija** ovog reda — ne
+  // stoji zatamnjeno nego ga nema. Sopstveni izbor se ne računa, pa se plasman
+  // uvek može promeniti ili povući.
+  picks.forEach((pick) => {
+    const allowed = new Set(PLACEMENTS.filter((pl) => {
+      const slots = placementSlots(discipline, pl.key);
+      if (slots === null) return true;
+      return (counts[pl.key] || 0) - (pick.value === pl.key ? 1 : 0) < slots;
+    }).map((pl) => pl.key));
+
+    // Meni se prepisuje samo kad se zaista promenio — inače bi svaki upis
+    // izgradio sve menije u kategoriji iznova.
+    const want = ['', ...PLACEMENTS.map((pl) => pl.key)
+      .filter((k) => allowed.has(k) || k === pick.value)].join('|');
+    if (want !== [...pick.options].map((o) => o.value).join('|')) {
+      const value = pick.value;
+      pick.innerHTML = placementOptions(value, allowed);
+      pick.value = value;
+    }
   });
 
   const box = cat.querySelector('.cat-slots');
@@ -914,6 +1176,317 @@ function onDisciplineFilterChange() {
 }
 
 
+// ── Podešavanja ────────────────────────────────────────────────────────
+
+/**
+ * Cenovnik kotizacija.
+ *
+ * Jedini deo pravilnika koji se za sada menja iz aplikacije — ostalo (uzrasne
+ * grupe, discipline, telesne težine) i dalje stoji u data.js, jer se menja
+ * jednom u nekoliko godina i menja ga onaj ko dira kod.
+ *
+ * Kotizacija se plaća **po prijavi**: ko je prijavljen u tri discipline plaća
+ * tri. Ekipa se plaća kao celina, enbu po svojoj ceni. Starijim uzrastima se
+ * prve tri discipline opraštaju — osim onih koje su ovde označene kao one
+ * koje se plaćaju uvek.
+ */
+function settingsHtml({ fees }) {
+  const groups = AGES.map((age) => `
+        <label class="pick">
+          <input type="checkbox" data-fee-group="${esc(age.code)}"${
+  fees.free.groups.indexOf(age.code) >= 0 ? ' checked' : ''}>
+          <span>${esc(age.code)} · ${esc(age.name.toLowerCase())}</span>
+        </label>`).join('');
+
+  const always = DISCIPLINES.filter((d) => !d.team).map((d) => `
+        <label class="pick">
+          <input type="checkbox" data-fee-always="${esc(d.name)}"${
+  fees.free.always.indexOf(d.name) >= 0 ? ' checked' : ''}>
+          <span>${esc(d.name)}</span>
+        </label>`).join('');
+
+  const amount = (key, label, value, note = '') => `
+      <label class="field">
+        <span class="field-label">${esc(label)}</span>
+        <input type="number" class="control is-narrow" min="0" step="1"
+               data-fee="${esc(key)}" value="${esc(value)}">
+        ${note ? `<span class="field-note">${esc(note)}</span>` : ''}
+      </label>`;
+
+  return `
+    ${fees.individual ? '' : `
+    <div class="notice">Iznos kotizacije još nije unet, pa list kotizacija
+    izlazi sa nulama.</div>`}
+
+    <section class="dip-setup" open>
+      <div class="dip-setup-head is-static">
+        <span class="dip-setup-title">Kotizacije</span>
+        <span class="dip-setup-actions">
+          <button type="button" class="btn-app is-quiet" id="fee-reset">Vrati podrazumevano</button>
+        </span>
+      </div>
+      <div class="dip-setup-body">
+        <div class="fee-row">
+          ${amount('individual', 'Po disciplini (din)', fees.individual)}
+          ${amount('team', 'Po ekipi (din)', fees.team)}
+          ${amount('enbu', 'Enbu, po paru (din)', fees.enbu)}
+          ${amount('coachRefund', 'Povrat treneru (%)', fees.coachRefund)}
+        </div>
+
+        <div class="fee-block">
+          <div class="fee-row">
+            ${amount('free.count', 'Besplatnih disciplina', fees.free.count)}
+            <div class="field is-grow">
+              <span class="field-label">Uzrasne grupe sa besplatnim disciplinama</span>
+              <div class="picks">${groups}</div>
+            </div>
+          </div>
+          <div class="field">
+            <span class="field-label">Discipline koje se plaćaju uvek</span>
+            <div class="picks">${always}</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="empty-screen is-quiet">
+      <h2 class="soon-title">Ostalo iz pravilnika — uskoro</h2>
+      <p class="soon-note">Uzrasne grupe, discipline i telesne težine i dalje se
+        menjaju u pravilniku (<code>assets/js/data.js</code>), pa ista izmena
+        važi za sve — i za aplikaciju i za formular koji klubovi popunjavaju.</p>
+    </div>`;
+}
+
+// ── Diplome ────────────────────────────────────────────────────────────
+
+/**
+ * Diplome se štampaju unapred, u tiražu, sa gotovim tekstom i praznim
+ * linijama. Posle takmičenja u te linije treba upisati ko je šta osvojio —
+ * i to onim redom kojim se kategorije završavaju, jer se dodeljuju odmah.
+ *
+ * Zato ovaj ekran ne pravi diplomu nego **upis na nju**: gde na listu stoji
+ * ime, gde klub, gde mesto i disciplina. Papir je tuđi i zadat, pa se ovde
+ * ne bira izgled nego mera.
+ */
+
+/** Mera lista u milimetrima — po njoj se računa i lenjir i širina upisa. */
+const slipSize = (setup) => (setup.orientation === 'landscape'
+  ? { width: 297, height: 210 } : { width: 210, height: 297 });
+
+/** Podrazumevani sadržaj svakog reda upisa. */
+const diplomaText = {
+  ime: ({ entry }) => entry.name,
+  klub: ({ entry }) => entry.club,
+  mesto: ({ placement }) => placement.place || placement.label,
+  disciplina: ({ entry }) => entry.discipline,
+  kategorija: ({ entry }) => categoryFullLabel(entry),
+};
+
+/** Isto to, sa izmišljenim podacima — za probni list. */
+const DIPLOMA_SAMPLE = {
+  entry: {
+    name: 'Petar Petrović', club: 'KK Fudokan Beograd', discipline: 'Kate',
+    group: 'C', sex: 'M', level: '1. nivo', weight: '',
+  },
+  placement: placementByKey('zlato'),
+};
+
+/**
+ * Ko dobija diplomu: **samo osvajači medalja**, po kategorijama, redom kojim
+ * se i dodeljuju — zlato, srebro, pa dve bronze.
+ *
+ * Kategorija bez ijedne medalje se ne prikazuje: dok plasman nije unet, nema
+ * se šta ni odštampati.
+ */
+function diplomaCategories({ registry, results }) {
+  const byEntry = new Map(results.map((r) => [r.entryId, r]));
+  const cats = new Map();
+
+  registry.entries.forEach((entry) => {
+    const placement = placementByKey(byEntry.get(entry.id)?.placement || '');
+    if (!placement?.medal) return;
+    const key = categoryKey(entry);
+    if (!cats.has(key)) cats.set(key, { key, first: entry, winners: [] });
+    cats.get(key).winners.push({ entry, placement });
+  });
+
+  const rank = (placement) => PLACEMENTS.findIndex((pl) => pl.key === placement.key);
+  const list = [...cats.values()];
+  list.forEach((cat) => cat.winners.sort((a, b) =>
+    rank(a.placement) - rank(b.placement) || a.entry.name.localeCompare(b.entry.name, 'sr')));
+
+  return list.sort((a, b) =>
+    (disciplineByName(a.first.discipline)?.order || 99)
+      - (disciplineByName(b.first.discipline)?.order || 99)
+    || categoryFullLabel(a.first).localeCompare(categoryFullLabel(b.first), 'sr'));
+}
+
+/** Jedno polje podešavanja — milimetri i tačke, ništa drugo se ne upisuje. */
+const diplomaField = (key, field, label, value, step = 1) => `
+      <label class="dip-field">
+        <span class="filter-label">${esc(label)}</span>
+        <input type="number" class="control is-narrow" step="${step}"
+               data-dip="${esc(key)}" data-dip-field="${esc(field)}"
+               value="${esc(value)}">
+      </label>`;
+
+function diplomasHtml({ competition, cats, setup }) {
+  if (!competition) {
+    return `
+      <div class="empty-screen">
+        <h2 class="soon-title">Nema aktuelnog takmičenja</h2>
+        <p class="soon-note">Nema izabranog takmičenja.</p>
+        <div class="soon-links">
+          <button type="button" class="btn-app is-primary" data-go="takmicenja">Takmičenja</button>
+        </div>
+      </div>`;
+  }
+
+  const ukupno = cats.reduce((sum, cat) => sum + cat.winners.length, 0);
+
+  // Mere se podese jednom, pa se godinama samo štampa — zato je okvir otvoren
+  // dok nije izmereno, a posle sklopljen, na jedan klik.
+  const setupHtml = `
+    <details class="dip-setup"${setup.savedAt ? '' : ' open'}>
+      <summary class="dip-setup-head">
+        <span class="dip-setup-title">Mere upisa</span>
+        <span class="dip-setup-actions">
+          <button type="button" class="btn-app is-quiet" id="dip-ruler">Probni list sa lenjirom</button>
+          <button type="button" class="btn-app is-quiet" id="dip-sample">Probna diploma</button>
+          <button type="button" class="btn-app is-quiet" id="dip-reset">Vrati podrazumevano</button>
+        </span>
+      </summary>
+      <div class="dip-setup-body">
+      <div class="filters">
+        <label class="filter">
+          <span class="filter-label">Položaj lista</span>
+          <select class="control is-narrow" id="dip-orientation">
+            <option value="portrait"${setup.orientation === 'portrait' ? ' selected' : ''}>uspravno</option>
+            <option value="landscape"${setup.orientation === 'landscape' ? ' selected' : ''}>položeno</option>
+          </select>
+        </label>
+      </div>
+      <div class="dip-rows">${DIPLOMA_LINES.map((line) => {
+    const cur = setup.lines[line.key];
+    return `
+        <div class="dip-row${cur.on ? '' : ' is-off'}">
+          <label class="pick">
+            <input type="checkbox" data-dip="${esc(line.key)}" data-dip-field="on"${cur.on ? ' checked' : ''}>
+            <span>${esc(line.label)}</span>
+          </label>
+          ${diplomaField(line.key, 'top', 'Odozgo (mm)', cur.top, 0.5)}
+          ${diplomaField(line.key, 'x', 'Levo − / desno + (mm)', cur.x, 0.5)}
+          ${diplomaField(line.key, 'size', 'Slovo (pt)', cur.size, 0.5)}
+        </div>`;
+  }).join('')}
+      </div>
+      </div>
+    </details>`;
+
+  if (!ukupno) {
+    return `${setupHtml}
+      <div class="empty-screen">
+        <h2 class="soon-title">Nema unetih medalja</h2>
+        <p class="soon-note">Diploma se štampa za osvajače medalja, a na takmičenju
+          „${esc(competition.name)}" nijedan plasman sa medaljom još nije unet.</p>
+        <div class="soon-links">
+          <button type="button" class="btn-app is-primary" data-go="rezultati">Rezultati</button>
+        </div>
+      </div>`;
+  }
+
+  const list = cats.map((cat) => `
+      <section class="cat" data-dip-cat="${esc(cat.key)}">
+        <div class="cat-head">
+          <span class="cat-name">${esc(cat.first.discipline)} · ${esc(categoryFullLabel(cat.first))}</span>
+          <span class="cat-count">${cat.winners.length} ${
+  plural(cat.winners.length, 'diploma', 'diplome', 'diploma')}</span>
+          <button type="button" class="btn-app is-quiet" data-print-diplomas="${esc(cat.key)}">Štampaj</button>
+        </div>${cat.winners.map(({ entry, placement }) => `
+        <div class="result-row">
+          <div class="result-who">
+            <div class="result-disc">${esc(entry.name)}</div>
+            <div class="result-meta">${esc(entry.club)}</div>
+          </div>
+          <span class="result-points is-medal">${esc(placement.place || placement.label)}</span>
+        </div>`).join('')}
+      </section>`).join('');
+
+  return `${setupHtml}
+    <div class="filters">
+      <span class="list-count">${cats.length} ${
+  plural(cats.length, 'kategorija', 'kategorije', 'kategorija')} · ${ukupno} ${
+  plural(ukupno, 'diploma', 'diplome', 'diploma')}</span>
+    </div>
+    ${list}`;
+}
+
+/**
+ * Redovi upisa za jednog osvajača, po izmerenim merama. Isključen red se ne
+ * štampa — na diplomi na kojoj disciplina već piše, ne treba je pisati opet.
+ */
+const diplomaLines = (winner, setup) => DIPLOMA_LINES
+  .filter((line) => setup.lines[line.key].on)
+  .map((line) => {
+    const mera = setup.lines[line.key];
+    return slipLine(diplomaText[line.key](winner), {
+      top: mera.top, x: mera.x, size: mera.size, caps: line.caps, strong: line.caps,
+    });
+  });
+
+/** Po jedan list na svakog osvajača, bez ičega osim upisa. */
+function diplomaSpec({ competition, winners, setup, title }) {
+  if (!winners.length) return null;
+  return {
+    orientation: setup.orientation,
+    context: competitionContext(competition),
+    spec: {
+      kicker: 'Diplome',
+      title: title || 'Diplome',
+      docCode: 'Upis na diplome',
+      slips: winners.map((winner) => ({
+        size: slipSize(setup),
+        lines: diplomaLines(winner, setup),
+      })),
+      rows: [],
+    },
+  };
+}
+
+/**
+ * Probni list: lenjir, izmišljen upis na izmerenim mestima i uputstvo.
+ *
+ * Štampa se na običan papir i prisloni uz diplomu prema svetlu — sa lenjira
+ * se pročita koliko je milimetara do svake linije i to se upiše u polja.
+ * Uputstvo stoji na papiru, a ne na ekranu, jer ga čita onaj ko taj papir
+ * drži u ruci.
+ */
+function diplomaTestSpec({ competition, setup }) {
+  const size = slipSize(setup);
+
+  return {
+    orientation: setup.orientation,
+    context: competitionContext(competition),
+    spec: {
+      kicker: 'Diplome',
+      title: 'Probni list',
+      docCode: 'Probni list za diplome',
+      slips: [{
+        size,
+        ruler: size,
+        note: 'PROBNI LIST ZA UPIS NA DIPLOME — štampati u razmeri 100 %, bez '
+          + 'uklapanja u stranu i bez margina koje štampač sam dodaje. Brojevi uz '
+          + 'ivice su milimetri od gornje ivice lista, brojevi u vrhu su milimetri '
+          + 'levo (−) i desno (+) od sredine. Prisloniti ovaj list uz diplomu prema '
+          + 'svetlu, očitati mere za ime, klub, mesto i disciplinu i upisati ih u '
+          + 'polja na ekranu Diplome.',
+        lines: diplomaLines(DIPLOMA_SAMPLE, setup),
+      }],
+      rows: [],
+    },
+  };
+}
+
 // ── Rang lista ─────────────────────────────────────────────────────────
 
 /**
@@ -939,6 +1512,33 @@ let tatamiState = null;
 
 /** Kategorije za žreb dok je taj ekran otvoren. */
 let drawState = null;
+
+/** Osvajači i mere upisa dok je otvoren ekran Diplome. */
+let diplomaState = null;
+
+/** Prijave dok je otvoren spisak takmičara — odatle ih uzima ispravka. */
+let competitorsState = null;
+
+/** Cenovnik dok su otvorena Podešavanja; upisuje se čim se polje napusti. */
+let feesState = null;
+
+async function updateFees(mutate) {
+  if (!feesState) return;
+  mutate(feesState);
+  await store.saveFees(feesState);
+}
+
+/**
+ * Mera se upiše čim se polje napusti, bez „sačuvaj" — kao i raspored po
+ * borilištima. Ekran se pri tome **ne iscrtava ponovo**: jedino što od mera
+ * zavisi su sama polja, a ponovno iscrtavanje bi odnelo fokus usred
+ * podešavanja.
+ */
+async function updateDiploma(mutate) {
+  if (!diplomaState) return;
+  mutate(diplomaState.setup);
+  await store.saveDiplomaSetup(diplomaState.setup);
+}
 
 /** U koje takmičenje ide uvoz; prazno znači aktuelno. */
 let importPick = '';
@@ -972,17 +1572,23 @@ function rankingsHtml({ seasons, season, data }) {
     pomera i nju — <button type="button" class="link-cell" data-reopen="${esc(season.id)}">otvori
     ponovo</button> ako treba.</div>`;
 
+  // Bodovi se knjiže zatvaranjem takmičenja. Takmičenje koje je odigrano a
+  // nije zatvoreno zato tiho nedostaje na rang listi — i to mora da piše,
+  // jer se sa same liste ne vidi da nešto čeka.
+  const pendingNotice = data.pending?.length ? `<div class="notice">
+    ${data.pending.length === 1 ? 'Jedno takmičenje u ovoj sezoni nije zatvoreno'
+    : `${data.pending.length} takmičenja u ovoj sezoni nisu zatvorena`} — bodovi sa
+    ${data.pending.length === 1 ? 'njega' : 'njih'} još nisu knjiženi:
+    ${data.pending.map((c) => esc(c.name)).join(', ')}. Medalje se broje odmah,
+    bodovi ulaze u rang listu kad se takmičenje zatvori.</div>` : '';
+
   if (!data.competitions.length) {
     return `
       ${seasonPicker.replace('%REST%', '')}
-      ${reopenNotice}
+      ${reopenNotice}${pendingNotice}
       <div class="empty-screen">
         <h2 class="soon-title">U ovoj sezoni nema takmičenja</h2>
-        <p class="soon-note">
-          Sezona ${esc(season.name)} (${esc(seasonSpan(season))}) nema nijedno
-          takmičenje, pa nema ni šta da se rangira. Izaberi drugu sezonu iznad
-          ili unesi takmičenje u ovom rasponu.
-        </p>
+        <p class="soon-note">Sezona ${esc(season.name)} (${esc(seasonSpan(season))}) nema nijedno takmičenje.</p>
       </div>`;
   }
 
@@ -1062,15 +1668,10 @@ function rankingsHtml({ seasons, season, data }) {
         ${data.totals.competitions} ${plural(data.totals.competitions, 'takmičenje', 'takmičenja', 'takmičenja')} ·
         ${data.totals.people} ${plural(data.totals.people, 'takmičar', 'takmičara', 'takmičara')}</span>`)}
 
-    ${reopenNotice}
+    ${reopenNotice}${pendingNotice}
 
     ${table}
-
-    <p class="table-note">
-      Bodovi se sabiraju po licu kroz celu sezonu, ne po nastupu. Klub i uzrasna
-      grupa su sa poslednjeg nastupa u sezoni. Isti bodovi znače deljeno mesto.
-      Ekipni plasmani se još ne broje.
-    </p>`;
+`;
 }
 
 /**
@@ -1212,7 +1813,7 @@ function drawHtml({ competition, index }) {
     return `
       <div class="empty-screen">
         <h2 class="soon-title">Nema aktuelnog takmičenja</h2>
-        <p class="soon-note">Izaberi takmičenje pa se kategorije za žreb pojave ovde.</p>
+        <p class="soon-note">Nema izabranog takmičenja.</p>
         <div class="soon-links">
           <button type="button" class="btn-app is-primary" data-go="takmicenja">Takmičenja</button>
         </div>
@@ -1222,8 +1823,7 @@ function drawHtml({ competition, index }) {
     return `
       <div class="empty-screen">
         <h2 class="soon-title">Nema prijava</h2>
-        <p class="soon-note">Na takmičenju „${esc(competition.name)}" još nema nijedne prijave,
-          pa nema ni šta da se izvlači.</p>
+        <p class="soon-note">Na takmičenju „${esc(competition.name)}" nema nijedne prijave.</p>
       </div>`;
   }
 
@@ -1254,7 +1854,6 @@ function drawHtml({ competition, index }) {
       </label>
       <span class="list-count" id="draw-count">${total} ${
         plural(total, 'kategorija', 'kategorije', 'kategorija')}</span>
-      <span class="slot-legend">svaki pritisak izvlači nov žreb</span>
     </div>
 
     <div class="draw-list">${index.map((d) => `
@@ -1296,13 +1895,7 @@ function drawHtml({ competition, index }) {
       prijave. Napravi novo takmičenje ili uvezi prijave za njih.
     </div>` : ''}
 
-    <p class="table-note">
-      Raspored je nasumičan; jedino pravilo je da se u prvoj rundi ne sretnu
-      dva takmičara iz istog kluba. Grana ima najviše ${MAX_BRACKET} mesta —
-      preko toga se kategorija deli na dve, iz svake prolaze po četiri u
-      završnu granu. Slobodni prolazi (BYE) se crtaju, da se vidi ko je i
-      zašto već u sledećoj koloni.
-    </p>`;
+`;
 }
 
 /** Prva stepenica dvojke koja primi toliko prijavljenih. */
@@ -1376,11 +1969,17 @@ function importHtml({ competitions, activeId }) {
   const s = importState;
   const target = competitions.find((c) => c.id === (importPick || activeId)) || competitions[0];
   const zbir = importTotals();
-  const ready = !!target && zbir.entries + zbir.teams > 0;
+  // Zatvorene prijave znače zatvoreno za sve — i za ispravku i za uvoz.
+  const open = !target || entriesOpen(target);
+  const ready = !!target && open && zbir.entries + zbir.teams > 0;
   const koliko = `${zbir.entries} ${plural(zbir.entries, 'prijavu', 'prijave', 'prijava')}`
     + (zbir.teams ? ` i ${zbir.teams} ${plural(zbir.teams, 'ekipu', 'ekipe', 'ekipa')}` : '');
 
   return `
+    ${open ? '' : `
+    <div class="notice">Na takmičenju „${esc(target.name)}" su prijave zatvorene —
+    uvoz je zaustavljen. Vrati prijave na kontrolnoj tabli ako je stigla
+    zakasnela prijava kluba.</div>`}
     <div class="filters">
       <label class="filter">
         <span class="filter-label">Uvozi u takmičenje</span>
@@ -1402,12 +2001,7 @@ function importHtml({ competitions, activeId }) {
 
     ${s.read.length ? importFilesCard(zbir, target) : `
     <div class="empty-screen">
-      <p class="empty">Izaberite popunjene formulare koje su klubovi dostavili.</p>
-      <p class="table-note">
-        Više fajlova se bira odjednom — u prozoru za izbor označe se svi i potvrdi.
-        Formular je zaseban Excel fajl koji klubovi popunjavaju kod sebe; aplikaciju
-        ne otvaraju. Prazan formular se preuzima dugmetom iznad.
-      </p>
+      <p class="empty">Nije izabran nijedan fajl.</p>
     </div>`}
 
     ${s.read.map((r) => importFileBlock(r, target)).join('')}
@@ -1422,6 +2016,12 @@ function importHtml({ competitions, activeId }) {
         <div><dt>Nove ekipe</dt><dd>${s.done.teams}</dd></div>
         <div><dt>Već upisano ranije</dt><dd>${s.done.skipped + s.done.teamsSkipped}</dd></div>
       </dl>
+      ${s.done.transfers?.length ? `
+      <p class="pf-note">Isto ime i godište već postoji pod drugim klubom, pa su
+        ovde upisani kao novi takmičari: ${s.done.transfers.map((n) => `
+        <b>${esc(n.name)}</b> (${esc(n.year)}, ${esc(n.from)} → ${esc(n.to)})`).join(', ')}.
+        Ako je imenjak — sve je kako treba. Ako je isti čovek koji je prešao klub,
+        bodovi mu kreću od nule.</p>` : ''}
     </section>` : ''}`;
 }
 
@@ -1462,16 +2062,12 @@ function importFilesCard(zbir, target) {
         </tr></thead>
         <tbody>${redovi}</tbody>
       </table>
-      ${zbir.losih ? `<p class="pf-warn">
-        ${zbir.losih} ${plural(zbir.losih, 'red se ne uvozi', 'reda se ne uvoze', 'redova se ne uvozi')} —
-        ispod, po klubu, stoji broj reda iz Excela i šta mu fali.</p>` : ''}
-      ${nepoznati.length ? `<p class="table-note">
-        ${nepoznati.length === 1 ? 'Klub' : 'Klubovi'} ${esc(nepoznati.join(', '))} ${
-  nepoznati.length === 1 ? 'nije' : 'nisu'} na spisku u aplikaciji — ${
-  nepoznati.length === 1 ? 'uvozi se' : 'uvoze se'} pod nazivom iz formulara.</p>` : ''}
-      ${target ? `<p class="table-note">
-        Uzrasne grupe računate po tabeli za <b>${seasonOf(target)}.</b> —
-        ${esc(AGES.map((a) => `${a.code} ${yearsLabel(a, seasonOf(target))}`).join(' · '))}</p>` : ''}
+      ${zbir.losih ? `<p class="pf-warn">${zbir.losih} ${
+  plural(zbir.losih, 'red se ne uvozi', 'reda se ne uvoze', 'redova se ne uvozi')}.</p>` : ''}
+      ${nepoznati.length ? `<p class="table-note">${
+  nepoznati.length === 1 ? 'Klub' : 'Klubovi'} ${esc(nepoznati.join(', '))} ${
+  nepoznati.length === 1 ? 'nije' : 'nisu'} na spisku u aplikaciji.</p>` : ''}
+
     </section>`;
 }
 
@@ -1598,11 +2194,7 @@ function calendarHtml({ seasons, season, competitions, counts }) {
       ${seasonPicker('')}
       <div class="empty-screen">
         <h2 class="soon-title">Godina je prazna</h2>
-        <p class="soon-note">
-          U sezoni ${esc(season.name)} (${esc(seasonSpan(season))}) nema nijednog
-          upisanog takmičenja. Upiši ga dugmetom gore desno — isti zapis se
-          odmah vidi i u evidenciji takmičenja.
-        </p>
+        <p class="soon-note">U sezoni ${esc(season.name)} (${esc(seasonSpan(season))}) nema nijednog takmičenja.</p>
       </div>`;
   }
 
@@ -1648,12 +2240,7 @@ function calendarHtml({ seasons, season, competitions, counts }) {
       <span class="list-count">${competitions.length} ${
         plural(competitions.length, 'takmičenje', 'takmičenja', 'takmičenja')} ·
         ${a} na A listi · ${competitions.length - a} na B</span>`)}
-    <div class="cal-body">${blocks}</div>
-    <p class="table-note">
-      Bodove nose samo takmičenja sa A liste. Plasman na B listi se upisuje i
-      medalja se broji kao i svaka druga — samo ne ulazi u rang listu.
-      Takmičenje upisano ovde je isti zapis koji stoji u evidenciji.
-    </p>`;
+    <div class="cal-body">${blocks}</div>`;
 }
 
 // ── Borilišta ──────────────────────────────────────────────────────────
@@ -1688,107 +2275,163 @@ const blockSexWord = (sex, code) =>
  * Discipline u bloku idu redosledom iz `DISCIPLINES`, ne azbučnim — tako se
  * i sudi i tako stoji u prilogu.
  */
-function tatamiBlocks(registry) {
+/**
+ * Jedan red rasporeda je **jedna disciplina jedne uzrasne grupe** — tačno ono
+ * što se odigra na jednom borilištu u jednom terminu.
+ *
+ * Ranije je jedinica bila cela uzrasna grupa, pa su sve njene discipline morale
+ * na isto borilište. Sada se par (grupa, disciplina) raspoređuje sam, a ekran
+ * ih samo grupiše — po uzrastu ili po disciplini, kako je organizatoru
+ * potrebno. Otuda „sportski kumite svih uzrasta na jedno borilište, ostalo na
+ * drugo" jeste nekoliko klikova, a ne nemoguć zahtev.
+ */
+function tatamiPairs(registry) {
   const map = new Map();
   registry.entries.forEach((e) => {
-    const id = `${e.group}-${e.sex}`;
+    const id = `${e.group}-${e.sex}|${e.discipline}`;
     if (!map.has(id)) {
-      map.set(id, { id, code: e.group, sex: e.sex, disciplines: new Set(), entries: 0, people: new Set() });
+      map.set(id, {
+        id, group: e.group, sex: e.sex, discipline: e.discipline,
+        entries: 0, people: new Set(),
+      });
     }
-    const b = map.get(id);
-    b.disciplines.add(e.discipline);
-    b.entries += 1;
-    b.people.add(e.competitorId);
+    const pair = map.get(id);
+    pair.entries += 1;
+    pair.people.add(e.competitorId);
   });
-
-  return [...map.values()]
-    .map((b) => {
-      const age = ageByCode(b.code);
-      return {
-        ...b,
-        age,
-        people: b.people.size,
-        name: `Grupa ${b.code} (${blockSexWord(b.sex, b.code)})`,
-        long: `Grupa ${b.code} · ${age ? age.name.toLowerCase() : ''} · ${blockSexWord(b.sex, b.code)}`,
-        disciplines: [...b.disciplines]
-          .sort((x, y) => (disciplineByName(x)?.order || 99) - (disciplineByName(y)?.order || 99)),
-      };
-    })
-    .sort((a, b) => (AGE_ORDER.indexOf(a.code) - AGE_ORDER.indexOf(b.code))
-      || a.sex.localeCompare(b.sex, 'sr'));
+  return [...map.values()].map((pair) => ({ ...pair, people: pair.people.size }));
 }
 
 const AGE_ORDER = 'ABCDEFGHIJ'.split('');
 
 /**
- * Blokovi raspoređeni po borilištima, plus oni koji još nisu nigde.
- * Borilište 0 je „nije raspoređeno" — postoji na ekranu, ne na papiru.
+ * Dva pogleda na isti raspored. Kartica je grupa parova: po uzrastu su to
+ * discipline jedne grupe, po disciplini uzrasne grupe jedne discipline.
  */
-function tatamiColumns(blocks, plan) {
-  const columns = Array.from({ length: plan.count }, () => []);
-  const pool = [];
+const TATAMI_AXES = {
+  uzrast: {
+    label: 'po uzrastu',
+    key: (pair) => `${pair.group}-${pair.sex}`,
+    name: (pair) => `Grupa ${pair.group} (${blockSexWord(pair.sex, pair.group)})`,
+    long: (pair) => `Grupa ${pair.group} · ${ageByCode(pair.group)?.name.toLowerCase() || ''}`
+      + ` · ${blockSexWord(pair.sex, pair.group)}`,
+    rank: (pair) => AGE_ORDER.indexOf(pair.group) * 2 + (pair.sex === 'M' ? 0 : 1),
+    item: (pair) => pair.discipline,
+    itemRank: (pair) => disciplineByName(pair.discipline)?.order || 99,
+  },
+  disciplina: {
+    label: 'po disciplini',
+    key: (pair) => pair.discipline,
+    name: (pair) => pair.discipline,
+    long: (pair) => pair.discipline,
+    rank: (pair) => disciplineByName(pair.discipline)?.order || 99,
+    item: (pair) => `Grupa ${pair.group} (${blockSexWord(pair.sex, pair.group)})`,
+    itemRank: (pair) => AGE_ORDER.indexOf(pair.group) * 2 + (pair.sex === 'M' ? 0 : 1),
+  },
+};
 
-  blocks.forEach((b) => {
-    const saved = plan.blocks[b.id];
-    const picked = saved?.disciplines
-      ? b.disciplines.filter((d) => saved.disciplines.includes(d))
-      : b.disciplines;
-    const row = { ...b, picked, order: saved?.order ?? 0 };
-    const mat = saved?.tatami;
-    if (mat >= 1 && mat <= plan.count) columns[mat - 1].push(row);
-    else pool.push(row);
+const axisOf = (plan) => TATAMI_AXES[plan.axis] || TATAMI_AXES.uzrast;
+
+/**
+ * Raspored pre uvođenja parova čuvao je borilište po uzrasnoj grupi. Prevodi se
+ * jednom, pri prvom otvaranju: ono što je bilo raspoređeno ostaje raspoređeno.
+ */
+function migrateTatamiPlan(plan, pairs) {
+  if (!plan.blocks || plan.migrated) return false;
+  pairs.forEach((pair) => {
+    const old = plan.blocks[`${pair.group}-${pair.sex}`];
+    if (!old?.tatami) return;
+    if (old.disciplines && !old.disciplines.includes(pair.discipline)) return;
+    plan.pairs[pair.id] = old.tatami;
+    plan.order[`uzrast|${pair.group}-${pair.sex}`] = old.order || 0;
+  });
+  plan.migrated = true;
+  return true;
+}
+
+/**
+ * Kartice po borilištima i one neraspoređene.
+ *
+ * Kartica se crta **na svakom borilištu na kom ima svoje parove**: uzrasna
+ * grupa čije dve discipline idu na različita borilišta pojaviće se na oba, sa
+ * onim što se tu zaista radi. Isto piše i na papiru.
+ */
+function tatamiCards(pairs, plan) {
+  const axis = axisOf(plan);
+  const columns = Array.from({ length: plan.count }, () => new Map());
+  const pool = new Map();
+
+  const put = (bucket, pair) => {
+    const key = axis.key(pair);
+    if (!bucket.has(key)) {
+      bucket.set(key, {
+        key, name: axis.name(pair), long: axis.long(pair),
+        rank: axis.rank(pair), pairs: [], people: 0, entries: 0,
+      });
+    }
+    const card = bucket.get(key);
+    card.pairs.push(pair);
+    card.people += pair.people;
+    card.entries += pair.entries;
+  };
+
+  pairs.forEach((pair) => {
+    const mat = plan.pairs[pair.id] || 0;
+    put(mat >= 1 && mat <= plan.count ? columns[mat - 1] : pool, pair);
   });
 
-  columns.forEach((list) => list.sort((a, b) => a.order - b.order
-    || AGE_ORDER.indexOf(a.code) - AGE_ORDER.indexOf(b.code)));
-  columns.forEach((list) => list.forEach((row, i) => { row.order = i + 1; }));
-  return { columns, pool };
+  const finish = (bucket) => [...bucket.values()].map((card) => ({
+    ...card,
+    order: plan.order[`${plan.axis}|${card.key}`] || 0,
+    items: card.pairs
+      .sort((a, b) => axis.itemRank(a) - axis.itemRank(b))
+      .map((pair) => axis.item(pair)),
+  }));
+
+  const cols = columns.map((bucket) => finish(bucket)
+    .sort((a, b) => a.order - b.order || a.rank - b.rank));
+  cols.forEach((list) => list.forEach((card, i) => { card.order = i + 1; }));
+  return { columns: cols, pool: finish(pool).sort((a, b) => a.rank - b.rank) };
 }
 
 /** „(M/Ž)" — koji polovi izlaze na to borilište, za zaglavlje kolone. */
 const matSexLabel = (list) => {
-  const sexes = [...new Set(list.map((b) => b.sex))];
+  const sexes = [...new Set(list.flatMap((card) => card.pairs.map((p) => p.sex)))];
   if (!sexes.length) return '';
   return sexes.length > 1 ? '(M/Ž)' : `(${sexes[0] === 'M' ? 'M' : 'Ž'})`;
 };
 
-function tatamiHtml({ competition, blocks, plan }) {
+function tatamiHtml({ competition, pairs, plan }) {
   if (!competition) {
     return `
       <div class="empty-screen">
         <h2 class="soon-title">Nema aktuelnog takmičenja</h2>
-        <p class="soon-note">Izaberi takmičenje pa se borilišta raspoređuju za njega.</p>
+        <p class="soon-note">Nema izabranog takmičenja.</p>
         <div class="soon-links">
           <button type="button" class="btn-app is-primary" data-go="takmicenja">Takmičenja</button>
         </div>
       </div>`;
   }
-  if (!blocks.length) {
+  if (!pairs.length) {
     return `
       <div class="empty-screen">
         <h2 class="soon-title">Nema prijava</h2>
-        <p class="soon-note">
-          Na takmičenju „${esc(competition.name)}" još nema nijedne prijave, pa
-          nema ni šta da se rasporedi po borilištima.
-        </p>
+        <p class="soon-note">Na takmičenju „${esc(competition.name)}" nema nijedne prijave.</p>
       </div>`;
   }
 
-  const { columns, pool } = tatamiColumns(blocks, plan);
-  const raspored = blocks.length - pool.length;
+  const { columns, pool } = tatamiCards(pairs, plan);
+  const raspored = pairs.length - pool.reduce((a, c) => a + c.pairs.length, 0);
 
-  const blockCard = (b, mat) => `
-    <article class="mat-block" data-block="${esc(b.id)}">
+  const card = (c, mat) => `
+    <article class="mat-block" data-block="${esc(c.key)}" data-mat="${mat}">
       <header class="mat-block-head">
-        <span class="mat-block-name">${esc(b.name)}</span>
-        <span class="mat-block-count">${b.people} ${plural(b.people, 'takmičar', 'takmičara', 'takmičara')} ·
-          ${b.entries} ${plural(b.entries, 'prijava', 'prijave', 'prijava')}</span>
+        <span class="mat-block-name">${esc(c.name)}</span>
+        <span class="mat-block-count">${c.people} ${plural(c.people, 'takmičar', 'takmičara', 'takmičara')} ·
+          ${c.entries} ${plural(c.entries, 'prijava', 'prijave', 'prijava')}</span>
       </header>
-      <div class="mat-block-discs">${b.disciplines.map((d) => `
-        <label class="mat-disc${b.picked.includes(d) ? ' is-on' : ''}">
-          <input type="checkbox" data-mat-disc="${esc(d)}"${b.picked.includes(d) ? ' checked' : ''}>
-          <span>${esc(d)}</span>
-        </label>`).join('')}
+      <div class="mat-block-discs">${c.items.map((item) => `
+        <span class="mat-disc is-on">${esc(item)}</span>`).join('')}
       </div>
       <footer class="mat-block-foot">
         <label class="mat-move">
@@ -1802,7 +2445,7 @@ function tatamiHtml({ competition, blocks, plan }) {
         ${mat ? `
         <span class="mat-order">
           <button type="button" class="link-cell" data-bump="-1" aria-label="Pomeri gore">▲</button>
-          <b>${b.order}.</b>
+          <b>${c.order}.</b>
           <button type="button" class="link-cell" data-bump="1" aria-label="Pomeri dole">▼</button>
         </span>` : ''}
       </footer>
@@ -1813,21 +2456,27 @@ function tatamiHtml({ competition, blocks, plan }) {
       <label class="filter">
         <span class="filter-label">Broj borilišta</span>
         <select class="control is-narrow" id="f-mats">${
-          [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `
+  [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `
             <option value="${n}"${n === plan.count ? ' selected' : ''}>${n}</option>`).join('')}
+        </select>
+      </label>
+      <label class="filter">
+        <span class="filter-label">Raspoređuje se</span>
+        <select class="control" id="f-axis">${Object.entries(TATAMI_AXES).map(([key, ax]) => `
+          <option value="${key}"${key === plan.axis ? ' selected' : ''}>${esc(ax.label)}</option>`).join('')}
         </select>
       </label>
       <button type="button" class="btn-app is-quiet" id="mats-spread">Rasporedi ravnomerno</button>
       <button type="button" class="btn-app is-quiet" id="mats-clear">Skloni sve</button>
-      <span class="list-count">${raspored} od ${blocks.length} ${
-        plural(blocks.length, 'kategorija raspoređena', 'kategorije raspoređene', 'kategorija raspoređeno')}</span>
+      <span class="list-count">${raspored} od ${pairs.length} ${
+  plural(pairs.length, 'stavka raspoređena', 'stavke raspoređene', 'stavki raspoređeno')}</span>
     </div>
 
     ${pool.length ? `
     <section class="mat-pool">
-      <h2 class="mat-pool-title">Nije raspoređeno — ${pool.length} ${
-        plural(pool.length, 'kategorija', 'kategorije', 'kategorija')}</h2>
-      <div class="mat-pool-list">${pool.map((b) => blockCard(b, 0)).join('')}</div>
+      <h2 class="mat-pool-title">Nije raspoređeno — ${pool.reduce((a, c) => a + c.pairs.length, 0)} ${
+  plural(pool.reduce((a, c) => a + c.pairs.length, 0), 'stavka', 'stavke', 'stavki')}</h2>
+      <div class="mat-pool-list">${pool.map((c) => card(c, 0)).join('')}</div>
     </section>` : ''}
 
     <div class="mat-board" style="--mats:${plan.count}">${columns.map((list, i) => `
@@ -1837,17 +2486,12 @@ function tatamiHtml({ competition, blocks, plan }) {
           <span class="mat-col-sex">${esc(matSexLabel(list))}</span>
         </header>
         <div class="mat-col-body">${list.length
-          ? list.map((b) => blockCard(b, i + 1)).join('')
-          : '<p class="mat-empty">Prazno — dodeli kategoriju iz spiska iznad.</p>'}
+    ? list.map((c) => card(c, i + 1)).join('')
+    : '<p class="mat-empty">Prazno.</p>'}
         </div>
       </section>`).join('')}
     </div>
-
-    <p class="table-note">
-      Kategorije i discipline se izvode iz prijava, pa raspored ne može da
-      pošalje na tatami kategoriju koja neće izaći. Isključena disciplina
-      ostaje prijavljena — samo se ne štampa na ovom borilištu.
-    </p>`;
+`;
 }
 
 // ── Štampa lista ───────────────────────────────────────────────────────
@@ -1965,50 +2609,49 @@ const seasonStack = ({ season, data }) => [
  * Kolone se čitaju odozgo naniže, pa red koji negde nema šta da stavi
  * ostaje prazan — i to je tačno, jer to borilište tada nema termin više.
  */
-function tatamiSpec({ competition, blocks, plan }) {
-  const { columns } = tatamiColumns(blocks, plan);
-  const depth = Math.max(0, ...columns.map((c) => c.length));
-
-  const rows = Array.from({ length: depth }, (unused, i) => ({
-    cells: columns.map((list) => {
-      const b = list[i];
-      // Prazan termin je i dalje blok-ćelija, da linija koja deli borilišta
-      // ne prestane na pola tabele.
-      if (!b) return block('');
-      return block(
-        `${b.name} — ${b.order}. nastupaju`,
-        b.picked,
-        b.age ? b.age.name : '',
-      );
-    }),
-  }));
+function tatamiSpec({ competition, pairs, plan }) {
+  const { columns, pool } = tatamiCards(pairs, plan);
 
   const assigned = columns.flat();
-  const people = assigned.reduce((a, b) => a + b.people, 0);
+  const people = assigned.reduce((a, c) => a + c.people, 0);
+  const nerasporedjeno = pool.reduce((a, c) => a + c.pairs.length, 0);
+
+  // Više od dva borilišta uspravno daje kolone uže od imena discipline, pa
+  // se prvo pokušava položen list. Uspravan je viši i primi dužu kolonu, pa
+  // ostaje kao druga mogućnost — renderer bira onaj na kom ceo raspored
+  // staje na jedan list.
+  const orientations = plan.count > 2 ? ['landscape', 'portrait'] : ['portrait', 'landscape'];
 
   return {
-    // Više od dva borilišta uspravno daje kolone uže od imena discipline.
-    orientation: plan.count > 2 ? 'landscape' : 'portrait',
+    orientation: orientations[0],
     context: competitionContext(competition),
     spec: {
       kicker: 'Raspored',
       title: 'Raspored takmičara na borilištima',
       meta1: `${plan.count} ${plural(plan.count, 'borilište', 'borilišta', 'borilišta')} · ${
-        assigned.length} ${plural(assigned.length, 'kategorija', 'kategorije', 'kategorija')} · ${
+        assigned.reduce((a, c) => a + c.pairs.length, 0)} ${
+        plural(assigned.reduce((a, c) => a + c.pairs.length, 0), 'stavka', 'stavke', 'stavki')} · ${
         people} ${plural(people, 'takmičar', 'takmičara', 'takmičara')}`,
       meta2: '',
       // Bez potpisa — raspored je radni list koji se lepi na zid i menja
       // tokom dana, a ne protokol koji neko overava.
       docCode: 'Raspored na borilištima',
-      columns: columns.map((list, i) => col(
-        `Borilište ${i + 1} ${matSexLabel(list)}`.trim(),
-        `${Math.floor(100 / plan.count)}%`,
-      )),
-      rows,
-      summary: '',
-      summaryRight: blocks.length - assigned.length
-        ? `Nije raspoređeno: ${blocks.length - assigned.length}`
+      // Tabla, a ne tabela: kolona je borilište i teče sama za sebe, pa
+      // raspored u kom jedno borilište ima mnogo više stavki od ostalih i
+      // dalje staje na jedan list.
+      board: {
+        orientations,
+        columns: columns.map((list, i) => ({
+          label: `Borilište ${i + 1} ${matSexLabel(list)}`.trim(),
+          cards: list.map((card) => boardCard(card.order, card.long, card.items)),
+        })),
+      },
+      rows: [],
+      summary: nerasporedjeno
+        ? `Nije raspoređeno: ${nerasporedjeno} ${
+          plural(nerasporedjeno, 'stavka', 'stavke', 'stavki')}`
         : '',
+      summaryRight: '',
     },
   };
 }
@@ -2299,6 +2942,69 @@ function clubsSpec({ clubs }) {
  * to već stoji u DOM-u, tačno onako kako korisnik gleda. Plasman se uzima
  * iz izbora, pa i ono što je upravo uneto a još nije osveženo ide na papir.
  */
+/**
+ * Rezultati jedne kategorije, poređani za pisanje diploma.
+ *
+ * Diplome se pišu čim se kategorija završi, a ne kad se završi celo takmičenje,
+ * pa svaka kategorija ima svoj list. Redosled je redosled mesta — prvo, drugo,
+ * dva treća, pa ostali — jer se tim redom i popunjavaju.
+ */
+function resultsCategorySpec({ competition, registry, results, key }) {
+  const byEntry = new Map(results.map((r) => [r.entryId, r]));
+  const entries = registry.entries.filter((e) => categoryKey(e) === key);
+  if (!entries.length) return null;
+
+  const order = (e) => {
+    const at = PLACEMENTS.findIndex((pl) => pl.key === byEntry.get(e.id)?.placement);
+    return at < 0 ? PLACEMENTS.length : at;
+  };
+  const sorted = [...entries].sort((a, b) =>
+    order(a) - order(b) || a.name.localeCompare(b.name, 'sr'));
+
+  const first = entries[0];
+  const upisano = entries.filter((e) => byEntry.has(e.id)).length;
+
+  return {
+    orientation: 'portrait',
+    context: competitionContext(competition),
+    spec: {
+      kicker: `Rezultati · ${first.discipline}`,
+      title: categoryFullLabel(first),
+      meta1: `${entries.length} ${plural(entries.length, 'prijava', 'prijave', 'prijava')}`
+        + ` · ${upisano} ${plural(upisano, 'plasman unet', 'plasmana uneta', 'plasmana uneto')}`,
+      meta2: '',
+      docCode: `Rezultati ${first.discipline}`,
+      columns: [
+        col('Mesto', '76px', 'center'), col('Ime i prezime'), col('Ime kluba'),
+        col('Grad'), col('Bodovi', '58px', 'center'),
+      ],
+      rows: sorted.map((e, i) => {
+        const pl = placementByKey(byEntry.get(e.id)?.placement || '');
+        return {
+          zebra: i % 2 === 1,
+          cells: [
+            cell(pl ? (pl.place || pl.label) : null, 'center', !!pl?.medal),
+            cell(e.name, 'left', true), cell(e.club), cell(e.city),
+            cell(pl ? pl.points : null, 'center'),
+          ],
+        };
+      }),
+      summary: '',
+    },
+  };
+}
+
+/** Sve kategorije jedne discipline, svaka na svom listu. */
+function resultsDisciplineSpecs({ competition, registry, results, discipline }) {
+  const keys = [];
+  registry.entries
+    .filter((e) => e.discipline === discipline)
+    .forEach((e) => { if (!keys.includes(categoryKey(e))) keys.push(categoryKey(e)); });
+  return keys
+    .map((key) => resultsCategorySpec({ competition, registry, results, key }))
+    .filter(Boolean);
+}
+
 function resultsSpec({ competition, registry }) {
   const byId = new Map(registry.entries.map((e) => [e.id, e]));
   const rows = [];
@@ -2378,17 +3084,18 @@ function resultsSpec({ competition, registry }) {
  */
 async function updateTatami(change) {
   if (!tatamiState) return;
-  const plan = {
-    count: tatamiState.plan.count,
-    blocks: JSON.parse(JSON.stringify(tatamiState.plan.blocks)),
-  };
+  const plan = JSON.parse(JSON.stringify(tatamiState.plan));
   change(plan);
   await store.saveTatamiPlan(tatamiState.competitionId, plan);
   render();
 }
 
-/** Zapis jednog bloka u planu, sa podrazumevanim vrednostima. */
-const planEntry = (plan, id) => (plan.blocks[id] ||= { tatami: 0, order: 0 });
+/** Parovi koje jedna kartica obuhvata na datom borilištu. */
+function cardPairs(plan, key, mat) {
+  const axis = axisOf(plan);
+  return tatamiState.pairs.filter((pair) =>
+    axis.key(pair) === key && (plan.pairs[pair.id] || 0) === mat);
+}
 
 // ── Modali ─────────────────────────────────────────────────────────────
 
@@ -2596,7 +3303,6 @@ function soonHtml(screen) {
     <div class="soon">
       <span class="soon-badge">Uskoro</span>
       <h2 class="soon-title">${esc(screen.title)}</h2>
-      <p class="soon-note">${esc(screen.note)}</p>
       <div class="soon-links">
         <button type="button" class="btn-app" data-go="kontrolna-tabla">Kontrolna tabla</button>
         <a class="btn-app" href="documents.html">Zvanični dokumenti</a>
@@ -2622,6 +3328,9 @@ async function render() {
   let seasonAction = null;
   tatamiState = null;
   drawState = null;
+  diplomaState = null;
+  competitorsState = null;
+  feesState = null;
 
   let body = '';
   if (screen.view === 'dashboard') {
@@ -2635,6 +3344,7 @@ async function render() {
       store.tallyByPerson(competition?.id),
     ]);
     body = competitorsHtml({ competition, registry, tally });
+    competitorsState = { competition, registry };
     if (registry.competitors.length) {
       printable = () => competitorsSpec({ competition, registry, tally });
     }
@@ -2650,6 +3360,25 @@ async function render() {
     body = resultsHtml({ competition, registry, results });
     if (competition && registry.entries.length) {
       printable = () => resultsSpec({ competition, registry });
+    }
+  } else if (screen.view === 'settings') {
+    const fees = await store.fees();
+    feesState = fees;
+    body = settingsHtml({ fees });
+  } else if (screen.view === 'diplomas') {
+    const [registry, results, setup] = await Promise.all([
+      store.registryFor(competition?.id),
+      store.resultsFor(competition?.id),
+      store.diplomaSetup(),
+    ]);
+    const cats = competition ? diplomaCategories({ registry, results }) : [];
+    body = diplomasHtml({ competition, cats, setup });
+    diplomaState = { competition, cats, setup };
+    if (cats.length) {
+      printable = () => diplomaSpec({
+        competition, setup, title: 'Diplome',
+        winners: cats.flatMap((cat) => cat.winners),
+      });
     }
   } else if (screen.view === 'draw') {
     const registry = await store.registryFor(competition?.id);
@@ -2676,11 +3405,12 @@ async function render() {
   } else if (screen.view === 'tatami') {
     const registry = await store.registryFor(competition?.id);
     const plan = await store.tatamiPlan(competition?.id);
-    const blocks = tatamiBlocks(registry);
-    body = tatamiHtml({ competition, blocks, plan });
-    if (blocks.length) {
-      tatamiState = { competitionId: competition.id, blocks, plan };
-      printable = () => tatamiSpec({ competition, blocks, plan });
+    const pairs = tatamiPairs(registry);
+    if (migrateTatamiPlan(plan, pairs)) await store.saveTatamiPlan(competition.id, plan);
+    body = tatamiHtml({ competition, pairs, plan });
+    if (pairs.length) {
+      tatamiState = { competitionId: competition.id, pairs, plan };
+      printable = () => tatamiSpec({ competition, pairs, plan });
     }
   } else if (screen.view === 'rankings') {
     const seasons = await store.listSeasons();
@@ -2732,10 +3462,11 @@ async function render() {
       </a>
       <nav class="side-nav" aria-label="Glavna navigacija">${navHtml(screen.id)}</nav>
       <div class="side-foot">
-        <button type="button" class="nav-item" data-go="podesavanja">
-          <span>Podešavanja</span><span class="nav-soon">uskoro</span>
+        <button type="button" class="nav-item"${screen.id === 'podesavanja' ? ' aria-current="page"' : ''}
+                data-go="podesavanja">
+          <span>Podešavanja</span>
         </button>
-        <div class="side-version" title="Ako ovo nije verzija koju si raspakovao, pregledač služi staru iz keša">${esc(APP_VERSION)}</div>
+        <div class="side-version">${esc(APP_VERSION)}</div>
       </div>
     </aside>
 
@@ -2759,29 +3490,121 @@ async function render() {
     if (search) search.addEventListener('input', filterList);
   }
 
+  if (document.querySelector('[data-fee]')) {
+    document.querySelectorAll('[data-fee]').forEach((input) => {
+      input.addEventListener('change', () => updateFees((fees) => {
+        const value = Math.max(0, Number(input.value) || 0);
+        if (input.dataset.fee === 'free.count') fees.free.count = value;
+        else fees[input.dataset.fee] = value;
+      }));
+    });
+
+    document.querySelectorAll('[data-fee-group]').forEach((input) => {
+      input.addEventListener('change', () => updateFees((fees) => {
+        const code = input.dataset.feeGroup;
+        const codes = new Set(fees.free.groups.split(''));
+        if (input.checked) codes.add(code); else codes.delete(code);
+        // Redosled je redosled uzrasne tabele, ne redosled klikanja.
+        fees.free.groups = AGE_ORDER.filter((c) => codes.has(c)).join('');
+      }));
+    });
+
+    document.querySelectorAll('[data-fee-always]').forEach((input) => {
+      input.addEventListener('change', () => updateFees((fees) => {
+        const name = input.dataset.feeAlways;
+        const names = new Set(fees.free.always);
+        if (input.checked) names.add(name); else names.delete(name);
+        fees.free.always = DISCIPLINES.filter((d) => names.has(d.name)).map((d) => d.name);
+      }));
+    });
+
+    document.getElementById('fee-reset').addEventListener('click', async () => {
+      await updateFees((fees) => {
+        Object.assign(fees, structuredClone(FEES_DEFAULT));
+      });
+      render();
+    });
+  }
+
+  const dipOrientation = document.getElementById('dip-orientation');
+  if (dipOrientation) {
+    dipOrientation.addEventListener('change', () =>
+      updateDiploma((setup) => { setup.orientation = dipOrientation.value; }));
+
+    document.querySelectorAll('[data-dip]').forEach((input) => {
+      input.addEventListener('change', () => updateDiploma((setup) => {
+        const mera = setup.lines[input.dataset.dip];
+        if (input.dataset.dipField === 'on') {
+          mera.on = input.checked;
+          input.closest('.dip-row').classList.toggle('is-off', !input.checked);
+        } else {
+          mera[input.dataset.dipField] = Number(input.value) || 0;
+        }
+      }));
+    });
+
+    document.getElementById('dip-reset').addEventListener('click', async (event) => {
+      event.preventDefault();
+      await updateDiploma((setup) => {
+        setup.orientation = DIPLOMA_DEFAULT.orientation;
+        setup.lines = structuredClone(DIPLOMA_DEFAULT.lines);
+      });
+      render();
+    });
+
+    document.getElementById('dip-ruler').addEventListener('click', (event) => {
+      event.preventDefault();
+      const { competition, setup } = diplomaState;
+      printStack([diplomaTestSpec({ competition, setup })], setup.orientation);
+    });
+
+    document.getElementById('dip-sample').addEventListener('click', (event) => {
+      event.preventDefault();
+      const { competition, setup, cats } = diplomaState;
+      const winner = cats[0]?.winners[0] || DIPLOMA_SAMPLE;
+      printStack([diplomaSpec({
+        competition, setup, winners: [winner], title: 'Probna diploma',
+      })], setup.orientation);
+    });
+  }
+
   const mats = document.getElementById('f-mats');
   if (mats) {
     mats.addEventListener('change', () => updateTatami((plan) => {
       const count = Number(mats.value);
-      // Blok koji je stajao na borilištu kojeg više nema vraća se u spisak
+      // Stavka koja je stajala na borilištu kojeg više nema vraća se u spisak
       // umesto da tiho nestane sa rasporeda.
-      Object.values(plan.blocks).forEach((b) => { if (b.tatami > count) b.tatami = 0; });
+      Object.keys(plan.pairs).forEach((id) => {
+        if (plan.pairs[id] > count) plan.pairs[id] = 0;
+      });
       plan.count = count;
     }));
+    document.getElementById('f-axis').addEventListener('change', (event) =>
+      updateTatami((plan) => { plan.axis = event.target.value; }));
     document.getElementById('mats-spread').addEventListener('click', () => updateTatami((plan) => {
-      // Ravnomerno po broju takmičara, a ne po broju kategorija: borilište
-      // sa dve velike grupe radi duže od onog sa četiri male.
+      // Ravnomerno po broju takmičara, a ne po broju stavki: borilište sa dve
+      // velike grupe radi duže od onog sa četiri male. Deli se po kartici
+      // izabrane podele, da ono što ide zajedno i ostane zajedno.
+      const axis = axisOf(plan);
+      const cards = new Map();
+      tatamiState.pairs.forEach((pair) => {
+        const key = axis.key(pair);
+        if (!cards.has(key)) cards.set(key, { people: 0, ids: [] });
+        const card = cards.get(key);
+        card.people += pair.people;
+        card.ids.push(pair.id);
+      });
       const load = Array.from({ length: plan.count }, () => 0);
-      [...tatamiState.blocks]
-        .sort((a, b) => b.people - a.people)
-        .forEach((b) => {
-          const lightest = load.indexOf(Math.min(...load));
-          load[lightest] += b.people;
-          plan.blocks[b.id] = { ...plan.blocks[b.id], tatami: lightest + 1, order: 0 };
-        });
+      [...cards.values()].sort((a, b) => b.people - a.people).forEach((card) => {
+        const lightest = load.indexOf(Math.min(...load));
+        load[lightest] += card.people;
+        card.ids.forEach((id) => { plan.pairs[id] = lightest + 1; });
+      });
+      plan.order = {};
     }));
     document.getElementById('mats-clear').addEventListener('click', () => updateTatami((plan) => {
-      Object.values(plan.blocks).forEach((b) => { b.tatami = 0; });
+      plan.pairs = {};
+      plan.order = {};
     }));
   }
 
@@ -2902,6 +3725,36 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
+  if (event.target.closest('[data-new-entry]') && competitorsState) {
+    const { competition } = competitorsState;
+    const season = seasonOf(competition);
+    editEntryModal({
+      competition,
+      isNew: true,
+      entries: [],
+      // Prazna prijava, sa merama koje se ionako biraju: godište u sredini
+      // uzrasne tabele, beli pojas, prvi klub po azbuci.
+      competitor: {
+        id: null, name: '', sex: 'M', year: season - 12,
+        belt: 'beli', club: CLUBS[0].name, weight: null,
+      },
+    });
+    return;
+  }
+
+  const edit = event.target.closest('[data-edit-entry]');
+  if (edit && competitorsState) {
+    const { competition, registry } = competitorsState;
+    const competitor = registry.competitors.find((c) => c.id === edit.dataset.editEntry);
+    if (!competitor) return;
+    editEntryModal({
+      competition,
+      competitor,
+      entries: registry.entries.filter((e) => e.competitorId === competitor.id),
+    });
+    return;
+  }
+
   const openCard = event.target.closest('[data-person]');
   if (openCard) {
     const personId = openCard.dataset.person;
@@ -2922,6 +3775,55 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
+  // Većina prijavljenih dobija učešće; menja se samo šačica sa medaljom. Zato
+  // se učešće upisuje odjednom, i to samo tamo gde plasman još ne stoji.
+  if (event.target.closest('[data-fill-ucesce]')) {
+    const competition = await store.activeCompetition();
+    if (!competition) return;
+    // Filter važi i ovde, kao i pri štampi: menja se ono što je na ekranu.
+    const ids = visibleIds('.result-row[data-print-id]');
+    const upisano = await store.fillPlacement(competition.id, ids, 'ucesce');
+    toast(upisano
+      ? `Učešće je upisano na ${upisano} ${plural(upisano, 'prijavu', 'prijave', 'prijava')}.`
+      : 'Sve prijave na ekranu već imaju plasman.');
+    render();
+    return;
+  }
+
+  // Štampa rezultata po kategoriji i po disciplini — diplome se pišu čim se
+  // kategorija završi, ne kad se završi celo takmičenje.
+  const printDip = event.target.closest('[data-print-diplomas]');
+  if (printDip && diplomaState) {
+    const cat = diplomaState.cats.find((c) => c.key === printDip.dataset.printDiplomas);
+    if (!cat) return;
+    printStack([diplomaSpec({
+      competition: diplomaState.competition,
+      setup: diplomaState.setup,
+      winners: cat.winners,
+      title: `${cat.first.discipline} · ${categoryFullLabel(cat.first)}`,
+    })], diplomaState.setup.orientation);
+    return;
+  }
+
+  const printCat = event.target.closest('[data-print-cat]');
+  const printDisc = event.target.closest('[data-print-disc]');
+  if (printCat || printDisc) {
+    event.preventDefault();          // dugme u <summary> inače sklapa disciplinu
+    const competition = await store.activeCompetition();
+    if (!competition) return;
+    const [registry, results] = await Promise.all([
+      store.registryFor(competition.id), store.resultsFor(competition.id),
+    ]);
+    const jobs = printCat
+      ? [resultsCategorySpec({ competition, registry, results,
+        key: printCat.closest('.cat').dataset.key })].filter(Boolean)
+      : resultsDisciplineSpecs({ competition, registry, results,
+        discipline: printDisc.dataset.printDisc });
+    if (!jobs.length) toast('Nema nijedne prijave za štampu.');
+    else printStack(jobs);
+    return;
+  }
+
   const draw = event.target.closest('[data-draw]');
   if (draw) {
     const category = drawState?.index.flatMap((d) => d.categories)
@@ -2935,20 +3837,21 @@ document.addEventListener('click', async (event) => {
 
   const bump = event.target.closest('[data-bump]');
   if (bump) {
-    const id = bump.closest('[data-block]').dataset.block;
+    const card = bump.closest('[data-block]');
+    const key = card.dataset.block;
+    const mat = Number(card.dataset.mat);
     const step = Number(bump.dataset.bump);
     await updateTatami((plan) => {
-      const { columns } = tatamiColumns(tatamiState.blocks, plan);
-      const mine = planEntry(plan, id).tatami;
-      const list = columns[mine - 1] || [];
-      const at = list.findIndex((b) => b.id === id);
+      const { columns } = tatamiCards(tatamiState.pairs, plan);
+      const list = columns[mat - 1] || [];
+      const at = list.findIndex((c) => c.key === key);
       const to = at + step;
       if (at < 0 || to < 0 || to >= list.length) return;
-      // Redosled se piše nad celom kolonom, ne samo nad dva bloka koja se
+      // Redosled se piše nad celom kolonom, ne samo nad dve kartice koje se
       // menjaju — inače bi kolona posle nekoliko pomeranja imala rupe.
       const next = [...list];
       [next[at], next[to]] = [next[to], next[at]];
-      next.forEach((b, i) => { planEntry(plan, b.id).order = i + 1; });
+      next.forEach((c, i) => { plan.order[`${plan.axis}|${c.key}`] = i + 1; });
     });
     return;
   }
@@ -2991,13 +3894,19 @@ document.addEventListener('click', async (event) => {
     // Svi fajlovi ulaze u jednu istu bazu, jedan za drugim. Prepoznavanje
     // lica i preskakanje već upisanih rade preko svih — pa dva kluba koja
     // greškom prijave istog čoveka ne prave dva zapisa.
-    const zbir = { files: 0, competitors: 0, entries: 0, teams: 0, skipped: 0, teamsSkipped: 0 };
+    const zbir = {
+      files: 0, competitors: 0, entries: 0, teams: 0, skipped: 0, teamsSkipped: 0,
+      transfers: [],
+    };
     try {
       for (const r of fajlovi) {
         const done = await store.importClubEntry(target, r.payload);
         zbir.files += 1;
         ['competitors', 'entries', 'teams', 'skipped', 'teamsSkipped']
           .forEach((k) => { zbir[k] += done[k]; });
+        // Ovi se ne sabiraju u broj nego se imenuju — o svakom od njih
+        // urednik treba da odluči je li imenjak ili čovek koji je prešao klub.
+        done.transfers.forEach((n) => zbir.transfers.push(n));
       }
       const into = await store.getCompetition(target);
       importState.done = { ...zbir, competition: into?.name || '' };
@@ -3057,31 +3966,40 @@ document.addEventListener('change', async (event) => {
 
   const move = event.target.closest('[data-move]');
   if (move) {
-    const id = move.closest('[data-block]').dataset.block;
+    const card = move.closest('[data-block]');
+    const key = card.dataset.block;
+    const from = Number(card.dataset.mat);
+    const to = Number(move.value);
     await updateTatami((plan) => {
-      const entry = planEntry(plan, id);
-      entry.tatami = Number(move.value);
-      // Na dno kolone: novi blok ide iza onih koji su već raspoređeni.
-      entry.order = entry.tatami ? 999 : 0;
+      // Premešta se tačno ono što ta kartica na tom borilištu i sadrži — grupa
+      // čije dve discipline stoje na dva borilišta seli samo ono odavde.
+      cardPairs(plan, key, from).forEach((pair) => { plan.pairs[pair.id] = to; });
+      // Na dno kolone: nova kartica ide iza onih koje su već raspoređene.
+      plan.order[`${plan.axis}|${key}`] = to ? 999 : 0;
     });
-    return;
-  }
-
-  // Namerno `data-mat-disc`, a ne `data-disc`: ovaj drugi već stoji na
-  // .cat i details.disc na ekranu Rezultati, pa bi svaki unos plasmana
-  // upadao ovde.
-  const disc = event.target.closest('[data-mat-disc]');
-  if (disc) {
-    const card = disc.closest('[data-block]');
-    const id = card.dataset.block;
-    const picked = [...card.querySelectorAll('[data-mat-disc]')]
-      .filter((x) => x.checked).map((x) => x.dataset.matDisc);
-    await updateTatami((plan) => { planEntry(plan, id).disciplines = picked; });
     return;
   }
 
   const pick = event.target.closest('.result-pick');
   if (!pick) return;
+
+  // Meni popunjena mesta i ne nudi, ali izbor ume da stigne i mimo menija —
+  // tastaturom, dopunom pregledača. Prekoračenje se vraća pre upisa u bazu.
+  const cat = pick.closest('.cat');
+  const slots = placementSlots(cat?.dataset.disc, pick.value);
+  if (pick.value && slots !== null) {
+    const used = [...cat.querySelectorAll('.result-pick')]
+      .filter((p) => p.value === pick.value).length;
+    if (used > slots) {
+      const pl = placementByKey(pick.value);
+      pick.value = pick.dataset.prev || '';
+      toast(`U kategoriji je već dodeljeno ${slots} ${plural(slots, 'mesto', 'mesta', 'mesta')} — ${pl.label.toLowerCase()}.`);
+      updateResultsProgress();
+      return;
+    }
+  }
+  pick.dataset.prev = pick.value;
+
   const competition = await store.activeCompetition();
   const registry = await store.registryFor(competition.id);
   const entry = registry.entries.find((e) => e.id === pick.dataset.entry);
