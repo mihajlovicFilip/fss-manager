@@ -76,20 +76,12 @@ takmičenje*. Name, date, place, level and **list: A or B**.
 One record, two views: a competition entered in the calendar appears in the
 register immediately, and the other way round.
 
-### 2. Send the forms to the clubs
+### 2. Send the form to the clubs
 
-Screen **Prijave** builds, in one click, **a pre-filled form for every club in
-the register** — name, year of birth, sex and last known belt already written
-in for every competitor the club has ever entered. The coach only ticks
-disciplines (and body weight for sport kumite) and adds new children at the
-bottom. Everything comes out as **one zip**, which also contains a blank form
-for a club entering for the first time — so a single mail with a single
-attachment covers everyone. Clubs fill the forms in Excel on their own
-machines; they never open the application and do not need to have it.
-
-Before the first season the register is empty, so the blank form alone is sent:
-it is on the same screen, on the *Uvoz prijava* screen, or taken directly from
-`form/FSS-Entry-Form.xlsx`.
+The blank form is downloaded with the **Prazan formular za klubove** button on
+the *Uvoz prijava* screen, or taken from `form/FSS-Entry-Form.xlsx`. Clubs fill
+it in Excel on their own machines — they never open the application and do not
+need to have it.
 
 ### 3. Import the entries
 
@@ -377,7 +369,6 @@ worse than no list at all.
 | ----------------------- | --------------------------------------------------------------------------- |
 | **Kontrolna tabla**     | dashboard: current competition, figures derived from the entry register, and checks that find what needs correcting |
 | **Takmičenja**          | competition register: create, select the current one, delete                 |
-| **Prijave**             | pre-filled entry forms, one per club, zipped for a single mail to everyone   |
 | **Uvoz prijava**        | read completed club forms and write them into the chosen competition         |
 | **Takmičari**           | competitor list with medals and points; a name opens that person's record across all seasons, *Izmeni* corrects an entry and *+ Nova prijava* writes a new one, while entries are open |
 | **Klubovi**             | competitors, medals and points per club                                      |
@@ -623,7 +614,6 @@ assets/css/documents.css      the documents page
 assets/js/data.js             rulebook and demo register
 assets/js/store.js            IndexedDB — the only seam to the data
 assets/js/app.js              router and every screen
-assets/js/club-forms.js       pre-filled club forms and their zip, in the browser
 assets/js/import.js           reading a completed form into entries
 assets/js/xlsx.js             .xlsx (zip + XML) with no library
 assets/js/draw.js             draw rules

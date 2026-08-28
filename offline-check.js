@@ -647,41 +647,6 @@ async function main() {
     }
     pass(`ekipna diploma nosi naziv tima („${teamDiploma}")`);
 
-    // ── Formulari za klubove: zip, i krug nazad kroz uvoz ──────────────
-    const formsCheck = await js(`(async () => {
-      const { store } = await import('./assets/js/store.js');
-      const { buildClubForms, buildClubForm } = await import('./assets/js/club-forms.js');
-      const roster = await store.clubRoster();
-      const out = await buildClubForms(roster);
-      const mine = roster.find((c) => c.club === 'KK Provera');
-      if (!mine) return { error: 'KK Provera nije u registru klubova' };
-      // Popunjen formular mora da pročita isti čitač kojim prijave i stižu.
-      const bytes = await (await buildClubForm(mine)).arrayBuffer();
-      const { readEntryFile } = await import('./assets/js/import.js');
-      const read = await readEntryFile(bytes, ${season});
-      return {
-        clubs: roster.length, files: out.files, bytes: out.blob.size,
-        inRoster: mine.people.length,
-        readClub: read.summary?.club || read.error || '',
-        readRows: (read.people || []).length,
-        // Red čeka trenera: discipline uvek, a pojas samo kod onih koji su
-        // dosad nastupali isključivo ekipno, pa im pojas nije ni zabeležen.
-        onlyCoachInput: (read.people || []).every((p) =>
-          p.problem === 'nije izabrana nijedna disciplina' || p.problem === 'nije unet pojas'),
-      };
-    })()`);
-    if (formsCheck.error) fail(`Formulari za klubove: ${formsCheck.error}`);
-    if (formsCheck.files !== formsCheck.clubs + 1 || formsCheck.bytes < 50_000) {
-      fail(`Zip formulara: ${formsCheck.files} fajlova za ${formsCheck.clubs} klubova, ${formsCheck.bytes} B.`);
-    }
-    if (formsCheck.readClub !== 'KK Provera'
-      || formsCheck.readRows !== formsCheck.inRoster
-      || !formsCheck.onlyCoachInput) {
-      fail('Popunjen formular se ne čita nazad kako je upisan: '
-        + JSON.stringify(formsCheck));
-    }
-    pass(`formulari za klubove: ${formsCheck.files} fajlova u zipu; popunjeni se čitaju nazad`
-      + ` (${formsCheck.readRows} redova, čeka se samo ono što unosi trener)`);
 
     // ── Dokumenti u PDF ────────────────────────────────────────────────
     await goto(`${ORIGIN}/documents.html`);

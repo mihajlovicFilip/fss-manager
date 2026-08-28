@@ -14,7 +14,7 @@ import {
   FEDERATION, DISCIPLINES, COMPETITION_LEVELS, PLACEMENTS, CALENDARS, MONTHS, APP_VERSION, AGES,
   categoryKey, disciplinesForGroup, disciplineByName, dateLabel, ageByCode, clubByName,
   placementByKey, placementSlots, pointsFor, calendarOf, teamCategoryLabel, teamSizeLabel,
-  seasonOf, SEASON, yearsLabel, DIPLOMA_LINES, DIPLOMA_DEFAULT, entriesOpen, pointsCounted,
+  seasonOf, yearsLabel, DIPLOMA_LINES, DIPLOMA_DEFAULT, entriesOpen, pointsCounted,
   BELTS, CLUBS, WEIGHTS, groupOfYear, levelOfBelt, FEES_DEFAULT,
 } from './data.js';
 import { store } from './store.js';
@@ -63,9 +63,6 @@ const SCREENS = [
   { id: 'klubovi', label: 'Klubovi', view: 'clubs',
     kicker: () => 'Evidencija', title: 'Klubovi' },
 
-  { id: 'prijave', label: 'Prijave', view: 'forms',
-    kicker: () => 'Formulari koji se šalju klubovima', title: 'Prijave' },
-
   { id: 'uvoz', label: 'Uvoz prijava', view: 'import',
     kicker: () => 'Excel formulari koje klubovi šalju', title: 'Uvoz prijava' },
 
@@ -93,7 +90,7 @@ const SCREENS = [
     kicker: () => 'Cenovnik i pravila', title: 'Podešavanja' },
 ];
 
-const NAV_MAIN = ['kontrolna-tabla', 'takmicenja', 'prijave', 'uvoz', 'takmicari',
+const NAV_MAIN = ['kontrolna-tabla', 'takmicenja', 'uvoz', 'takmicari',
   'klubovi', 'zreb', 'tatami', 'rezultati', 'diplome', 'rang',
   'kalendar', 'dokumenti'];
 
@@ -2030,90 +2027,6 @@ function drawHtml({ competition, index }) {
 /** Prva stepenica dvojke koja primi toliko prijavljenih. */
 const bracketOf = (n) => Math.max(2, 2 ** Math.ceil(Math.log2(Math.max(n, 2))));
 
-// ── Prijave — formulari za klubove ─────────────────────────────────────
-
-/**
- * Klubovima se ne šalje prazan formular nego **unapred popunjen**: za svaki
- * klub iz registra, sa njegovim poznatim takmičarima. Trener samo štiklira
- * discipline i dopiše novu decu na dno — a savez pošalje jedan mejl svima,
- * sa jednim zipom u prilogu. Punjenje radi `club-forms.js`, registar daje
- * `store.clubRoster()`.
- */
-function formsHtml({ roster }) {
-  const total = roster.reduce((a, c) => a + c.people.length, 0);
-
-  if (!roster.length) {
-    return `
-      <div class="empty-screen">
-        <h2 class="soon-title">Registar je prazan</h2>
-        <p class="soon-note">Registar klubova nastaje iz uvezenih prijava — posle prve
-          sezone ovde stoji svaki klub sa svojim takmičarima, spreman za formular.
-          Do tada klubovima ide prazan formular.</p>
-        <div class="soon-links">
-          <a class="btn-app is-primary" href="form/FSS-Entry-Form.xlsx" download>Prazan formular</a>
-        </div>
-      </div>`;
-  }
-
-  return `
-    <div class="notice">Svaki klub dobija formular sa <b>već upisanim takmičarima</b> —
-      ime, godište, pol i poslednji poznati pojas iz registra. Trener samo štiklira
-      discipline (i telesnu težinu za sport kumite), a novu decu dopisuje na dno.
-      Zip sadrži i prazan formular, za klub koji se prijavljuje prvi put —
-      pa jedan mejl sa jednim prilogom pokriva sve.</div>
-
-    <div class="filters">
-      <button type="button" class="btn-app is-primary" id="forms-zip">
-        Preuzmi formulare za sve klubove (zip)</button>
-      <a class="btn-app is-quiet" href="form/FSS-Entry-Form.xlsx" download>Prazan formular</a>
-      <span class="list-count">${roster.length} ${plural(roster.length, 'klub', 'kluba', 'klubova')}
-        · ${num(total)} ${plural(total, 'takmičar', 'takmičara', 'takmičara')} u registru</span>
-    </div>
-
-    <table class="grid is-dense">
-      <thead>
-        <tr>
-          <th>Klub</th><th>Grad</th><th>Trener</th>
-          <th class="col-num">Takmičara u registru</th>
-        </tr>
-      </thead>
-      <tbody>${roster.map((c) => `
-        <tr>
-          <td><b>${esc(c.club)}</b></td>
-          <td>${esc(c.city)}</td>
-          <td>${esc(c.coach)}</td>
-          <td class="col-num">${num(c.people.length)}</td>
-        </tr>`).join('')}
-      </tbody>
-    </table>`;
-}
-
-/** Klik na dugme: napuni, spakuj, ponudi fajl — sve u pregledaču. */
-async function downloadClubForms(button) {
-  button.disabled = true;
-  const was = button.textContent;
-  button.textContent = 'Priprema…';
-  try {
-    // Modul se učitava tek ovde — punjenje formulara ne treba pri pokretanju.
-    const [{ buildClubForms }, roster] = await Promise.all([
-      import('./club-forms.js'), store.clubRoster(),
-    ]);
-    const { blob, files, skipped } = await buildClubForms(roster);
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `FSS-Prijave-${SEASON()}.zip`;
-    link.click();
-    URL.revokeObjectURL(link.href);
-    toast(`Spremno: ${files} ${plural(files, 'formular', 'formulara', 'formulara')} u zipu.`
-      + (skipped.length ? ` Preko 120 takmičara, višak nije upisan: ${skipped.join(', ')}.` : ''));
-  } catch (err) {
-    toast(`Formulari nisu napravljeni: ${err.message}`);
-  } finally {
-    button.disabled = false;
-    button.textContent = was;
-  }
-}
-
 // ── Uvoz prijava iz Excela ─────────────────────────────────────────────
 
 /*
@@ -3627,9 +3540,6 @@ async function render() {
     if (competition && registry.entries.length) {
       printable = () => resultsSpec({ competition, registry });
     }
-  } else if (screen.view === 'forms') {
-    const roster = await store.clubRoster();
-    body = formsHtml({ roster });
   } else if (screen.view === 'settings') {
     const [fees, storage] = await Promise.all([store.fees(), store.storageProtection()]);
     feesState = fees;
@@ -4046,11 +3956,6 @@ document.addEventListener('click', async (event) => {
 
   // Većina prijavljenih dobija učešće; menja se samo šačica sa medaljom. Zato
   // se učešće upisuje odjednom, i to samo tamo gde plasman još ne stoji.
-  if (event.target.id === 'forms-zip') {
-    await downloadClubForms(event.target);
-    return;
-  }
-
   if (event.target.closest('[data-fill-ucesce]')) {
     const competition = await store.activeCompetition();
     if (!competition) return;
