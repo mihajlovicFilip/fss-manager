@@ -818,7 +818,7 @@ function resultsHtml({ competition, registry, results }) {
         </div>
       </div>`;
   }
-  if (!registry.entries.length) {
+  if (!registry.entries.length && !registry.teams.length) {
     return `
       <div class="empty-screen">
         <h2 class="soon-title">Nema prijava</h2>
@@ -896,11 +896,77 @@ function resultsHtml({ competition, registry, results }) {
       </details>`;
     }).join('');
 
-  const done = registry.entries.filter((e) => byEntry.has(e.id)).length;
+  // Ekipne kategorije idu istim ekranom, istim menijem i istim brojanjem
+  // mesta: red je ekipa umesto takmičara, plasman je jedan za celu ekipu.
+  const teamsByDisc = new Map();
+  registry.teams.forEach((t) => {
+    if (!teamsByDisc.has(t.discipline)) teamsByDisc.set(t.discipline, new Map());
+    const cats = teamsByDisc.get(t.discipline);
+    const key = teamKeyOf(t);
+    if (!cats.has(key)) cats.set(key, []);
+    cats.get(key).push(t);
+  });
+
+  const teamSections = [...teamsByDisc.entries()]
+    .sort((a, b) => (disciplineByName(a[0])?.order || 99) - (disciplineByName(b[0])?.order || 99))
+    .map(([discipline, cats]) => {
+      const list = [...cats.values()].flat();
+      const entered = list.filter((t) => byEntry.has(t.id)).length;
+
+      const categories = [...cats.values()]
+        .sort((a, b) => teamCategoryLabel(a[0]).localeCompare(teamCategoryLabel(b[0]), 'sr'))
+        .map((group) => {
+          const first = group[0];
+          const rows = group
+            .sort((a, b) => a.label.localeCompare(b.label, 'sr'))
+            .map((t) => {
+              const placement = byEntry.get(t.id)?.placement || '';
+              const pl = placementByKey(placement);
+              return `
+            <div class="result-row" data-print-id="${esc(t.id)}" data-year="">
+              <div class="result-who">
+                <div class="result-disc">${esc(t.label)}</div>
+                <div class="result-meta">${esc((t.members || []).map((m) => m.name).join(', '))}</div>
+              </div>
+              <span class="result-points${pl?.medal ? ' is-medal' : ''}">${pl ? pl.points + ' bodova' : '—'}</span>
+              <select class="control result-pick" data-team="${esc(t.id)}"
+                      data-prev="${esc(placement)}"${locked ? ' disabled' : ''}
+                      aria-label="Plasman — ${esc(t.label)}">${options(placement)}</select>
+            </div>`;
+            }).join('');
+
+          return `
+        <section class="cat" data-disc="${esc(discipline)}" data-key="${esc(teamKeyOf(first))}"
+                 data-cat="${esc(teamCategoryLabel(first))}" data-sex="${esc(first.sex || '')}">
+          <div class="cat-head">
+            <span class="cat-name">${esc(teamCategoryLabel(first))}</span>
+            <span class="cat-slots"></span>
+            <span class="cat-count">${group.length} ${plural(group.length, 'ekipa', 'ekipe', 'ekipa')}</span>
+            <button type="button" class="btn-app is-quiet" data-print-cat>Štampaj</button>
+          </div>
+          ${rows}
+        </section>`;
+        }).join('');
+
+      return `
+      <details class="disc" data-disc="${esc(discipline)}">
+        <summary class="disc-head">
+          <span class="disc-name">${esc(discipline)}</span>
+          <span class="disc-meta">${cats.size} ${plural(cats.size, 'kategorija', 'kategorije', 'kategorija')} · ${list.length} ${plural(list.length, 'ekipa', 'ekipe', 'ekipa')}</span>
+          <span class="disc-progress">${entered} / ${list.length}</span>
+          <button type="button" class="btn-app is-quiet" data-print-disc="${esc(discipline)}">Štampaj</button>
+        </summary>
+        <div class="disc-body">${categories}</div>
+      </details>`;
+    }).join('');
+
+  const total = registry.entries.length + registry.teams.length;
+  const done = registry.entries.filter((e) => byEntry.has(e.id)).length
+    + registry.teams.filter((t) => byEntry.has(t.id)).length;
 
   // Padajući filteri se pune iz onoga što na takmičenju zaista postoji, pa
   // nema izbora koji ne daje nijedan red.
-  resultsIndex = buildResultsIndex(registry.entries);
+  resultsIndex = buildResultsIndex(registry.entries, registry.teams);
 
   return `
     ${locked ? `<div class="notice">Takmičenje je zatvoreno — plasmani se više ne menjaju.
@@ -939,17 +1005,20 @@ function resultsHtml({ competition, registry, results }) {
         </select>
       </label>
       <button type="button" class="btn-app is-quiet" id="f-reset" hidden>Poništi filtere</button>
-      ${!locked && done < registry.entries.length
+      ${!locked && done < total
     ? '<button type="button" class="btn-app is-quiet" data-fill-ucesce>Svima učešće</button>' : ''}
-      <span class="list-count" id="results-progress">${done} od ${registry.entries.length} plasmana uneto</span>
+      <span class="list-count" id="results-progress">${done} od ${total} plasmana uneto</span>
     </div>
-    <div class="disc-list" id="results-list">${disciplines}</div>`;
+    <div class="disc-list" id="results-list">${disciplines}${teamSections}</div>`;
 }
+
+/** Ključ ekipne kategorije — sa oznakom, da se nikad ne pomeša sa pojedinačnim. */
+const teamKeyOf = (team) => `team:${team.discipline}|${team.group}|${team.variant || team.sex}`;
 
 /** Šta uopšte postoji na ovom takmičenju — punjenje padajućih filtera. */
 let resultsIndex = { disciplines: [], byDiscipline: new Map(), years: [] };
 
-function buildResultsIndex(entries) {
+function buildResultsIndex(entries, teams = []) {
   const byDiscipline = new Map();
   const years = new Set();
   const sexes = new Set();
@@ -958,6 +1027,11 @@ function buildResultsIndex(entries) {
     byDiscipline.get(e.discipline).add(categoryLabel(e));
     years.add(e.year);
     sexes.add(e.sex);
+  });
+  teams.forEach((t) => {
+    if (!byDiscipline.has(t.discipline)) byDiscipline.set(t.discipline, new Set());
+    byDiscipline.get(t.discipline).add(teamCategoryLabel(t));
+    if (t.sex) sexes.add(t.sex);
   });
   const disciplines = [...byDiscipline.keys()]
     .sort((a, b) => (disciplineByName(a)?.order || 99) - (disciplineByName(b)?.order || 99));
@@ -1314,7 +1388,8 @@ const diplomaText = {
   klub: ({ entry }) => entry.club,
   mesto: ({ placement }) => placement.place || placement.label,
   disciplina: ({ entry }) => entry.discipline,
-  kategorija: ({ entry }) => categoryFullLabel(entry),
+  // Ekipna diploma nosi kategoriju ekipe; imena članova se ne pišu nigde.
+  kategorija: ({ entry }) => entry.teamCategory || categoryFullLabel(entry),
 };
 
 /** Isto to, sa izmišljenim podacima — za probni list. */
@@ -1345,15 +1420,31 @@ function diplomaCategories({ registry, results }) {
     cats.get(key).winners.push({ entry, placement });
   });
 
+  // Ekipna diploma: na mestu imena stoji naziv tima (klub, sa rimskim brojem
+  // kad ih klub ima više u kategoriji) — imena članova se ne pišu.
+  registry.teams.forEach((team) => {
+    const placement = placementByKey(byEntry.get(team.id)?.placement || '');
+    if (!placement?.medal) return;
+    const entry = {
+      name: team.label, club: team.club, discipline: team.discipline,
+      group: team.group, sex: team.sex || '', level: '', weight: '',
+      teamCategory: teamCategoryLabel(team),
+    };
+    const key = teamKeyOf(team);
+    if (!cats.has(key)) cats.set(key, { key, first: entry, winners: [] });
+    cats.get(key).winners.push({ entry, placement });
+  });
+
   const rank = (placement) => PLACEMENTS.findIndex((pl) => pl.key === placement.key);
   const list = [...cats.values()];
   list.forEach((cat) => cat.winners.sort((a, b) =>
     rank(a.placement) - rank(b.placement) || a.entry.name.localeCompare(b.entry.name, 'sr')));
 
+  const labelOf = (entry) => entry.teamCategory || categoryFullLabel(entry);
   return list.sort((a, b) =>
     (disciplineByName(a.first.discipline)?.order || 99)
       - (disciplineByName(b.first.discipline)?.order || 99)
-    || categoryFullLabel(a.first).localeCompare(categoryFullLabel(b.first), 'sr'));
+    || labelOf(a.first).localeCompare(labelOf(b.first), 'sr'));
 }
 
 /** Jedno polje podešavanja — milimetri i tačke, ništa drugo se ne upisuje. */
@@ -1433,7 +1524,7 @@ function diplomasHtml({ competition, cats, setup }) {
   const list = cats.map((cat) => `
       <section class="cat" data-dip-cat="${esc(cat.key)}">
         <div class="cat-head">
-          <span class="cat-name">${esc(cat.first.discipline)} · ${esc(categoryFullLabel(cat.first))}</span>
+          <span class="cat-name">${esc(cat.first.discipline)} · ${esc(cat.first.teamCategory || categoryFullLabel(cat.first))}</span>
           <span class="cat-count">${cat.winners.length} ${
   plural(cat.winners.length, 'diploma', 'diplome', 'diploma')}</span>
           <button type="button" class="btn-app is-quiet" data-print-diplomas="${esc(cat.key)}">Štampaj</button>
@@ -2986,6 +3077,9 @@ function clubsSpec({ clubs }) {
  */
 function resultsCategorySpec({ competition, registry, results, key }) {
   const byEntry = new Map(results.map((r) => [r.entryId, r]));
+  if (key.startsWith('team:')) {
+    return teamCategorySpec({ competition, registry, byEntry, key });
+  }
   const entries = registry.entries.filter((e) => categoryKey(e) === key);
   if (!entries.length) return null;
 
@@ -3029,12 +3123,60 @@ function resultsCategorySpec({ competition, registry, results, key }) {
   };
 }
 
+/** Rezultati jedne ekipne kategorije — red je ekipa, uz spisak članova. */
+function teamCategorySpec({ competition, registry, byEntry, key }) {
+  const teams = registry.teams.filter((t) => teamKeyOf(t) === key);
+  if (!teams.length) return null;
+
+  const order = (t) => {
+    const at = PLACEMENTS.findIndex((pl) => pl.key === byEntry.get(t.id)?.placement);
+    return at < 0 ? PLACEMENTS.length : at;
+  };
+  const sorted = [...teams].sort((a, b) =>
+    order(a) - order(b) || a.label.localeCompare(b.label, 'sr'));
+  const first = teams[0];
+  const upisano = teams.filter((t) => byEntry.has(t.id)).length;
+
+  return {
+    orientation: 'portrait',
+    context: competitionContext(competition),
+    spec: {
+      kicker: `Rezultati · ${first.discipline}`,
+      title: teamCategoryLabel(first),
+      meta1: `${teams.length} ${plural(teams.length, 'ekipa', 'ekipe', 'ekipa')}`
+        + ` · ${upisano} ${plural(upisano, 'plasman unet', 'plasmana uneta', 'plasmana uneto')}`,
+      meta2: '',
+      docCode: `Rezultati ${first.discipline}`,
+      columns: [
+        col('Mesto', '76px', 'center'), col('Naziv tima'), col('Članovi'),
+        col('Bodovi', '58px', 'center'),
+      ],
+      rows: sorted.map((t, i) => {
+        const pl = placementByKey(byEntry.get(t.id)?.placement || '');
+        return {
+          zebra: i % 2 === 1,
+          cells: [
+            cell(pl ? (pl.place || pl.label) : null, 'center', !!pl?.medal),
+            cell(t.label, 'left', true),
+            cell((t.members || []).map((m) => m.name).join(', ')),
+            cell(pl ? pl.points : null, 'center'),
+          ],
+        };
+      }),
+      summary: '',
+    },
+  };
+}
+
 /** Sve kategorije jedne discipline, svaka na svom listu. */
 function resultsDisciplineSpecs({ competition, registry, results, discipline }) {
   const keys = [];
   registry.entries
     .filter((e) => e.discipline === discipline)
     .forEach((e) => { if (!keys.includes(categoryKey(e))) keys.push(categoryKey(e)); });
+  registry.teams
+    .filter((t) => t.discipline === discipline)
+    .forEach((t) => { if (!keys.includes(teamKeyOf(t))) keys.push(teamKeyOf(t)); });
   return keys
     .map((key) => resultsCategorySpec({ competition, registry, results, key }))
     .filter(Boolean);
@@ -3042,6 +3184,8 @@ function resultsDisciplineSpecs({ competition, registry, results, discipline }) 
 
 function resultsSpec({ competition, registry }) {
   const byId = new Map(registry.entries.map((e) => [e.id, e]));
+  // Ekipa na papiru punih rezultata: naziv tima na mestu imena, bez godišta.
+  registry.teams.forEach((t) => byId.set(t.id, { name: t.label, club: t.club, year: '' }));
   const rows = [];
   let groupIndex = 0;
 
@@ -4037,8 +4181,13 @@ document.addEventListener('change', async (event) => {
 
   const competition = await store.activeCompetition();
   const registry = await store.registryFor(competition.id);
-  const entry = registry.entries.find((e) => e.id === pick.dataset.entry);
-  await store.setResult(entry, pick.value);
+  if (pick.dataset.team) {
+    const team = registry.teams.find((t) => t.id === pick.dataset.team);
+    await store.setTeamResult(team, pick.value);
+  } else {
+    const entry = registry.entries.find((e) => e.id === pick.dataset.entry);
+    await store.setResult(entry, pick.value);
+  }
 
   // Bez ponovnog iscrtavanja: dugačak spisak ne sme da skoči na vrh posle
   // svakog upisa. Menja se samo ono što se zaista promenilo.

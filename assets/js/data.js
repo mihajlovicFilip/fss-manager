@@ -619,6 +619,9 @@ const BELT_FOR_LEVEL = {
  * jedna, broj bi bio samo šum. Kategorija je ovde disciplina + uzrasna grupa
  * + vrsta ekipe, jer se u toj kutiji i sreću.
  */
+/** Redni broj ekipe se piše rimski — „KK Niš II", kako stoji i na diplomi. */
+const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+
 export function labelTeams(teams) {
   const counts = new Map();
   const key = (t) => `${t.discipline}|${t.group}|${t.variant || t.sex}|${t.club}`;
@@ -630,7 +633,7 @@ export function labelTeams(teams) {
     if (counts.get(k) === 1) { t.label = t.club; return; }
     const n = (seen.get(k) || 0) + 1;
     seen.set(k, n);
-    t.label = `${t.club} ${n}`;
+    t.label = `${t.club} ${ROMAN[n - 1] || n}`;
   });
   return teams;
 }

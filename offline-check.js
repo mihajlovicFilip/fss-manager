@@ -42,6 +42,9 @@ const KEEP = process.argv.includes('--keep');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+/** Bodovi jednog plasmana — iz pravilnika, da provera ne nosi svoju skalu. */
+const placementValue = (d, key) => d.PLACEMENTS.find((p) => p.key === key)?.points || 0;
+
 let passed = 0;
 const pass = (msg) => { passed += 1; console.log(`  ✓ ${msg}`); };
 const fail = (msg) => { throw new Error(msg); };
@@ -597,6 +600,53 @@ async function main() {
         + `baza ${first.competitors}/${first.entries}/${first.teams}.`);
     }
     pass('brojke na kontrolnoj tabli jednake bazi');
+
+    // ── Ekipni plasman: bodovi članovima, medalja klubu jednom ─────────
+    const teamCheck = await js(`(async () => {
+      const { store } = await import('./assets/js/store.js');
+      const r = await store.registryFor(${JSON.stringify(compId)});
+      const team = r.teams[0];
+      if (!team) return { error: 'u registru nema nijedne ekipe' };
+      await store.setTeamResult(team, 'zlato');
+      await store.setCompetitionStatus(${JSON.stringify(compId)}, 'Završeno');
+      const tally = await store.tallyByPerson(${JSON.stringify(compId)});
+      const people = await store.listPeople();
+      const members = (team.members || []).map((m) => {
+        const person = people.find((p) => p.club === team.club && p.year === m.year
+          && p.name.toLowerCase() === m.name.toLowerCase());
+        const t = person && tally.get(person.id);
+        return { name: m.name, found: !!person, zlato: t?.here.zlato || 0, bodovi: t?.here.bodovi || 0 };
+      });
+      const clubs = await store.clubTally();
+      const mine = clubs.clubs.find((c) => c.name === team.club);
+      return {
+        label: team.label,
+        members,
+        club: { zlato: mine?.zlato || 0, medalje: mine?.medalje || 0, bodovi: mine?.bodovi || 0 },
+      };
+    })()`);
+    if (teamCheck.error) fail(`Ekipni plasman: ${teamCheck.error}`);
+    const gold = placementValue(d, 'zlato');
+    teamCheck.members.forEach((m) => {
+      if (!m.found) fail(`Član ekipe „${m.name}" nema svoje lice u bazi.`);
+      if (m.zlato !== 1 || m.bodovi !== gold) {
+        fail(`Član „${m.name}" ima ${m.zlato} zlata i ${m.bodovi} bodova — očekuje se 1 i ${gold}.`);
+      }
+    });
+    if (teamCheck.club.zlato !== 1 || teamCheck.club.medalje !== 1 || teamCheck.club.bodovi !== gold) {
+      fail(`Klubu ekipno zlato nije upisano jednom: ${JSON.stringify(teamCheck.club)}`);
+    }
+    pass(`ekipno zlato: ${teamCheck.members.length} člana po ${gold} bodova, klubu jedna medalja`);
+
+    // Diploma za ekipu postoji i nosi naziv tima, ne imena članova.
+    await js('location.hash = "diplome"');
+    await until('ekipna diploma', `!!document.querySelector('[data-dip-cat^="team:"]')`);
+    const teamDiploma = await js(`document.querySelector('[data-dip-cat^="team:"] .result-disc')?.textContent`);
+    if (teamDiploma !== teamCheck.label) {
+      fail(`Na ekipnoj diplomi stoji „${teamDiploma}" umesto naziva tima „${teamCheck.label}".`);
+    }
+    pass(`ekipna diploma nosi naziv tima („${teamDiploma}")`);
+
 
     // ── Dokumenti u PDF ────────────────────────────────────────────────
     await goto(`${ORIGIN}/documents.html`);

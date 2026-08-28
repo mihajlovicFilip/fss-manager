@@ -211,6 +211,13 @@ Screen **Rezultati** (results) groups entries by category. A placement is picked
 from a menu and saved immediately, without confirmation. Points are never
 entered — they are derived from the placement.
 
+**Team categories sit on the same screen**, below the individual disciplines: a
+row is a team (its members listed underneath), the placement is one for the
+whole team, and the same one-first-one-second-two-thirds rule applies. A team
+placement credits **every member with the full points** on their own ranking
+row, while the club's medal table counts the team medal **once** — a team gold
+is one gold, however many children won it.
+
 **A category awards one first place, one second and two thirds.** Once a place
 is taken it **disappears from the menu** in the remaining rows of that category —
 it is not greyed out, it is simply not offered — so a second gold cannot be
@@ -241,6 +248,11 @@ Diplomas are printed in advance, in bulk, with the wording already on them and
 the lines left blank. Screen **Diplome** fills those blanks: it prints **only
 the text**, on paper that is otherwise the federation's own pre-printed
 diploma — no letterhead, no title, no footer, one sheet per medallist.
+
+**A team gets one diploma, in the team's name.** The name line carries the club,
+with a roman numeral when the club fielded more than one team in the category
+(*KK Niš I*, *KK Niš II*); discipline and category print as usual, and the
+members' names are not written anywhere.
 
 Five fields can be written: name, club, place, discipline and category. Each has
 its own **measurements in millimetres** — how far down from the top edge of the
@@ -362,8 +374,8 @@ worse than no list at all.
 | **Klubovi**             | competitors, medals and points per club                                      |
 | **Žreb / Tabele**       | brackets per category, random draw and printing                              |
 | **Tatami**              | assignment of categories to mats                                             |
-| **Rezultati**           | placement entry, grouped by category                                         |
-| **Diplome**             | overprinting medallists' details onto pre-printed blank diplomas             |
+| **Rezultati**           | placement entry, grouped by category — individual and team                   |
+| **Diplome**             | overprinting medallists' details onto pre-printed blank diplomas; a team diploma carries the team's name |
 | **Rang lista**          | club and age-group rankings, closing the season                              |
 | **Kalendar**            | competitions by month, A and B lists                                         |
 | **Dokumenti**           | entry sheets per club, category and discipline, plus the team and full lists |
@@ -695,18 +707,15 @@ within months and fail on its own.
 
 In order of how much each one hurts:
 
-1. **Teams have no placements or points.** They import, appear on lists and can
-   be drawn and printed — but the results screen has no team categories, so they
-   can win neither medals nor points, and no diploma is printed for them.
-2. **Sport kumite weight classes are provisional** — until the official table
+1. **Sport kumite weight classes are provisional** — until the official table
    arrives they mirror the traditional ones.
-3. **There is no backup.** Exporting and importing the whole database (or a
+2. **There is no backup.** Exporting and importing the whole database (or a
    single competition) does not exist yet.
-4. **The П/П marker** for competitors with special needs, required by the
+3. **The П/П marker** for competitors with special needs, required by the
    official table, has not been introduced.
-5. **The rulebook has no screen.** **Podešavanja** holds the fee price list,
+4. **The rulebook has no screen.** **Podešavanja** holds the fee price list,
    but the rest of the rulebook — age groups, disciplines, weight classes — is
    still edited in `data.js`.
-6. **Excel still reports a repair** when the form is opened. The file works
+5. **Excel still reports a repair** when the form is opened. The file works
    correctly afterwards — dropdowns, derived columns and checks are all in
    place — but the cause has not been established.

@@ -195,6 +195,22 @@ const identityOf = (person) => {
 };
 
 /**
+ * Lica članova jedne ekipe, preko identiteta (ime + godište + klub ekipe).
+ *
+ * Član se ne pamti sa personId — uvoz i ispravke ga vode po imenu — pa se
+ * lice svaki put nađe iznova, istim pravilom kojim ga je uvoz i upisao.
+ * Član čije lice ne postoji (ekipa iz baze starije od ove mogućnosti) se
+ * preskače: bodovi ne mogu da legnu na red koga nema.
+ */
+const teamMembersOf = (team, personByIdentity) => (team.members || [])
+  .map((m) => personByIdentity.get(identityOf({ ...m, club: team.club })))
+  .filter(Boolean);
+
+/** Ekipni red rezultata prepoznaje se po oznaci, sa starim `entryId` upisom. */
+const teamOf = (result, teamById) => (result.kind === 'team'
+  ? teamById.get(result.teamId || result.entryId) || null : null);
+
+/**
  * Prevod zatečenih lica na identitet sa klubom.
  *
  * Baza napravljena ranijom verzijom nosi identitete bez kluba; da se ne
@@ -804,6 +820,31 @@ export const store = {
       });
     });
 
+    // I član ekipe je lice u bazi — bez toga ekipni plasman ne bi imao kome
+    // da upiše bodove. Prepoznaje se istim identitetom (ime + godište + klub)
+    // kao i pojedinačna prijava, a imenjak iz drugog kluba se i ovde imenuje,
+    // ne rešava tiho.
+    (payload.teams || []).forEach((t) => {
+      (t.members || []).forEach((m) => {
+        const identity = identityOf({ ...m, club });
+        if (byIdentity.has(identity)) return;
+        const elsewhere = (byLoose.get(looseIdentity(m)) || [])
+          .filter((p) => String(p.club || '').toLowerCase() !== club.toLowerCase());
+        if (elsewhere.length) {
+          transfers.push({ name: m.name, year: m.year, from: elsewhere[0].club || '', to: club });
+        }
+        const person = {
+          id: newId(), identity, name: m.name, sex: m.sex, year: m.year,
+          club, licence: null,
+        };
+        byIdentity.set(identity, [person]);
+        const loose = looseIdentity(m);
+        if (!byLoose.has(loose)) byLoose.set(loose, []);
+        byLoose.get(loose).push(person);
+        newPeople.push(person);
+      });
+    });
+
     // Ista ekipa je ista disciplina, grupa, vrsta, klub i isti sastav. Klub
     // sme da prijavi dve ekipe u istoj kategoriji, pa razlikuje sastav.
     const teamKey = (t) => [t.discipline, t.group, t.variant, t.club,
@@ -1176,6 +1217,35 @@ export const store = {
   },
 
   /**
+   * Plasman jedne ekipe. Red rezultata nosi `kind: 'team'` i ekipu umesto
+   * lica — bodove članovima ne upisuje ovde nego ih, kao i sve ostalo,
+   * izvode zbirovi iz plasmana: svaki član dobija pune bodove na svoj
+   * karton, a klubu se ekipna medalja broji jednom, ne po članu.
+   */
+  async setTeamResult(team, placement) {
+    const existing = (await allBy('results', 'entryId', team.id))[0] || null;
+    if (!placement) {
+      if (existing) await tx('results', 'readwrite', (os) => os.delete(existing.id));
+      return null;
+    }
+    if (!placementByKey(placement)) throw new Error(`Nepoznat plasman: ${placement}`);
+    const result = {
+      id: existing?.id || newId(),
+      competitionId: team.competitionId,
+      // `entryId` nosi ekipu zbog postojećeg indeksa; `kind` kaže šta je red.
+      entryId: team.id,
+      teamId: team.id,
+      personId: null,
+      kind: 'team',
+      discipline: team.discipline,
+      placement,
+      recordedAt: new Date().toISOString(),
+    };
+    await tx('results', 'readwrite', (os) => os.put(result));
+    return result;
+  },
+
+  /**
    * Upisuje isti plasman na sve prijave koje ga još nemaju.
    *
    * Postoji zbog jedne stvari na dan takmičenja: većina prijavljenih dobija
@@ -1189,14 +1259,17 @@ export const store = {
    */
   async fillPlacement(competitionId, entryIds, placement) {
     if (!placementByKey(placement)) throw new Error(`Nepoznat plasman: ${placement}`);
-    const [entries, results] = await Promise.all([
+    const [entries, teams, results] = await Promise.all([
       allBy('entries', 'competitionId', competitionId),
+      allBy('teams', 'competitionId', competitionId),
       allBy('results', 'competitionId', competitionId),
     ]);
     const taken = new Set(results.map((r) => r.entryId));
+    // U spisku sa ekrana stoje i prijave i ekipe — razvrstava ih baza, ne ekran.
     const wanted = new Set(entryIds);
     const missing = entries.filter((e) => wanted.has(e.id) && !taken.has(e.id));
-    if (!missing.length) return 0;
+    const missingTeams = teams.filter((t) => wanted.has(t.id) && !taken.has(t.id));
+    if (!missing.length && !missingTeams.length) return 0;
 
     const recordedAt = new Date().toISOString();
     await tx('results', 'readwrite', (os) => {
@@ -1209,8 +1282,19 @@ export const store = {
         placement,
         recordedAt,
       }));
+      missingTeams.forEach((team) => os.put({
+        id: newId(),
+        competitionId: team.competitionId,
+        entryId: team.id,
+        teamId: team.id,
+        personId: null,
+        kind: 'team',
+        discipline: team.discipline,
+        placement,
+        recordedAt,
+      }));
     });
-    return missing.length;
+    return missing.length + missingTeams.length;
   },
 
   resultsFor(competitionId) {
@@ -1225,11 +1309,15 @@ export const store = {
    *   ključ je personId; Tally je { zlato, srebro, bronza, ucesce, medalje, bodovi }
    */
   async tallyByPerson(competitionId) {
-    const [results, competitions] = await Promise.all([all('results'), all('competitions')]);
+    const [results, competitions, teams, register] = await Promise.all([
+      all('results'), all('competitions'), all('teams'), all('people'),
+    ]);
     // Bodove nose samo takmičenja sa A liste, i to tek kad su zatvorena.
     // Medalja se broji odmah — u kolonu ulazi čim se plasman upiše, bez
     // obzira na listu i na to da li je takmičenje gotovo.
     const scoring = new Set(competitions.filter(pointsCounted).map((c) => c.id));
+    const teamById = new Map(teams.map((t) => [t.id, t]));
+    const personByIdentity = new Map(register.map((p) => [p.identity, p]));
 
     const blank = () => ({ zlato: 0, srebro: 0, bronza: 0, ucesce: 0, medalje: 0, bodovi: 0 });
     const add = (tally, placement, scores) => {
@@ -1239,16 +1327,29 @@ export const store = {
     };
 
     const map = new Map();
-    results.forEach((r) => {
-      if (!r.personId) return;
-      if (!map.has(r.personId)) {
-        map.set(r.personId, { here: blank(), total: blank(), competitions: new Set() });
+    const rowOf = (personId) => {
+      if (!map.has(personId)) {
+        map.set(personId, { here: blank(), total: blank(), competitions: new Set() });
       }
-      const row = map.get(r.personId);
+      return map.get(personId);
+    };
+    const score = (personId, r) => {
+      const row = rowOf(personId);
       const scores = scoring.has(r.competitionId);
       add(row.total, r.placement, scores);
       row.competitions.add(r.competitionId);
       if (r.competitionId === competitionId) add(row.here, r.placement, scores);
+    };
+
+    results.forEach((r) => {
+      // Ekipni plasman: svaki član dobija pune bodove i medalju na svoj red.
+      const team = teamOf(r, teamById);
+      if (team) {
+        teamMembersOf(team, personByIdentity).forEach((p) => score(p.id, r));
+        return;
+      }
+      if (!r.personId) return;
+      score(r.personId, r);
     });
 
     map.forEach((row) => { row.competitions = row.competitions.size; });
@@ -1317,13 +1418,16 @@ export const store = {
    * @returns {{clubs: Array, totals: Object}} klubovi sortirani po bodovima
    */
   async clubTally() {
-    const [competitors, entries, results, competitions] = await Promise.all([
+    const [competitors, entries, results, competitions, teams, register] = await Promise.all([
       all('competitors'), all('entries'), all('results'), all('competitions'),
+      all('teams'), all('people'),
     ]);
     const scoring = new Set(competitions.filter(pointsCounted).map((c) => c.id));
 
     const competitorById = new Map(competitors.map((c) => [c.id, c]));
     const entryById = new Map(entries.map((e) => [e.id, e]));
+    const teamById = new Map(teams.map((t) => [t.id, t]));
+    const personByIdentity = new Map(register.map((p) => [p.identity, p]));
 
     const blank = (name) => ({
       name,
@@ -1349,10 +1453,26 @@ export const store = {
     });
     entries.forEach((e) => { if (e.club) clubOf(e.club).entries += 1; });
 
+    // I ekipa pripada klubu: njeni članovi ulaze u broj lica, prijava u broj
+    // prijava — da klub koji nastupa samo ekipno ne izgleda kao da ga nema.
+    teams.forEach((t) => {
+      if (!t.club) return;
+      const club = clubOf(t.club);
+      if (t.city) club.city = t.city;
+      club.competitions.add(t.competitionId);
+      club.entries += 1;
+      teamMembersOf(t, personByIdentity).forEach((p) => club.people.add(p.id));
+    });
+
     results.forEach((r) => {
-      const entry = entryById.get(r.entryId);
-      const competitor = entry && competitorById.get(entry.competitorId);
-      const name = competitor?.club || entry?.club;
+      // Ekipna medalja se klubu broji jednom — ekipa je jedan plasman, ma
+      // koliko članova imala. Bodove po članu vodi lični karton, ne ovaj zbir.
+      const team = teamOf(r, teamById);
+      const name = team ? team.club : (() => {
+        const entry = entryById.get(r.entryId);
+        const competitor = entry && competitorById.get(entry.competitorId);
+        return competitor?.club || entry?.club;
+      })();
       if (!name) return;
       const club = clubOf(name);
       club[r.placement] = (club[r.placement] || 0) + 1;
@@ -1378,6 +1498,8 @@ export const store = {
     // Zbir se ne dobija sabiranjem kolone „takmičari": ko je nastupao za dva
     // kluba broji se u oba, pa bi zbir bio veći od stvarnog broja lica.
     const everyone = new Set(competitors.map((c) => c.personId).filter(Boolean));
+    teams.forEach((t) => teamMembersOf(t, personByIdentity)
+      .forEach((p) => everyone.add(p.id)));
     const totals = ['zlato', 'srebro', 'bronza', 'ucesce', 'medalje', 'bodovi']
       .reduce((acc, key) => ({ ...acc, [key]: list.reduce((sum, c) => sum + c[key], 0) }),
         { people: everyone.size, clubs: list.length });
@@ -1557,8 +1679,9 @@ export const store = {
    * ujedno i spisak svih koji su se te sezone takmičili u toj kategoriji.
    */
   async rankings(season) {
-    const [competitions, competitors, entries, results] = await Promise.all([
+    const [competitions, competitors, entries, results, teams, register] = await Promise.all([
       all('competitions'), all('competitors'), all('entries'), all('results'),
+      all('teams'), all('people'),
     ]);
 
     const inside = competitions.filter((c) => inSeason(c.date, season))
@@ -1573,6 +1696,9 @@ export const store = {
     const competitorById = new Map(mine.map((c) => [c.id, c]));
     const entryById = new Map(entries.filter((e) => ids.has(e.competitionId))
       .map((e) => [e.id, e]));
+    const teamById = new Map(teams.filter((t) => ids.has(t.competitionId))
+      .map((t) => [t.id, t]));
+    const personByIdentity = new Map(register.map((p) => [p.identity, p]));
 
     const blank = () => ({ zlato: 0, srebro: 0, bronza: 0, ucesce: 0, medalje: 0, bodovi: 0 });
     const score = (row, placement, scores) => {
@@ -1624,10 +1750,35 @@ export const store = {
 
     results.forEach((r) => {
       if (!ids.has(r.competitionId)) return;
+      const scores = scoring.has(r.competitionId);
+
+      // Ekipni plasman: klub jednom, a svaki član pune bodove na svoj red.
+      // Član koji te sezone nije nastupao pojedinačno dobija red ovde — u
+      // rang listi mora da postoji, inače bi mu ekipni bodovi propali.
+      const team = teamOf(r, teamById);
+      if (team) {
+        if (team.club) score(clubOf(team.club), r.placement, scores);
+        teamMembersOf(team, personByIdentity).forEach((p) => {
+          if (!people.has(p.id)) {
+            const member = (team.members || []).find((m) =>
+              identityOf({ ...m, club: team.club }) === p.identity) || {};
+            people.set(p.id, {
+              personId: p.id, ...blank(),
+              nastupa: 0, clubs: new Set([team.club]), lastDate: '',
+              name: p.name, club: team.club, city: team.city || '',
+              year: p.year, group: team.group, sex: member.sex || p.sex || '',
+              belt: member.belt || '',
+            });
+          }
+          if (team.club) clubOf(team.club).people.add(p.id);
+          score(people.get(p.id), r.placement, scores);
+        });
+        return;
+      }
+
       const entry = entryById.get(r.entryId);
       const competitor = entry && competitorById.get(entry.competitorId);
       const person = r.personId && people.get(r.personId);
-      const scores = scoring.has(r.competitionId);
       if (person) score(person, r.placement, scores);
       // Medalja pripada klubu za koji se tog dana nastupalo, ne današnjem.
       const name = competitor?.club || entry?.club;
@@ -1693,11 +1844,18 @@ export const store = {
   },
 };
 
-/** Lica bez ijednog nastupa — briše ih se posle brisanja takmičenja. */
+/**
+ * Lica bez ijednog nastupa — briše ih se posle brisanja takmičenja.
+ * Nastup je i članstvo u ekipi: ko postoji samo kao član, postoji.
+ */
 async function pruneOrphanPeople() {
-  const [people, competitors] = await Promise.all([all('people'), all('competitors')]);
+  const [people, competitors, teams] = await Promise.all([
+    all('people'), all('competitors'), all('teams'),
+  ]);
   const used = new Set(competitors.map((c) => c.personId));
-  const orphans = people.filter((p) => !used.has(p.id));
+  const memberIdentities = new Set(teams.flatMap((t) =>
+    (t.members || []).map((m) => identityOf({ ...m, club: t.club }))));
+  const orphans = people.filter((p) => !used.has(p.id) && !memberIdentities.has(p.identity));
   if (!orphans.length) return;
   await tx('people', 'readwrite', (os) => orphans.forEach((p) => os.delete(p.id)));
 }
