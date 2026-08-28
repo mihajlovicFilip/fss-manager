@@ -589,6 +589,7 @@ migrated automatically on first launch and then removed.
 index.html                    application shell and dashboard
 documents.html                print module (its own view, its own rules)
 start.command                 double-click launcher (local server + browser)
+offline-check.js              the standing check (see Verification)
 sw.js                         offline cache — raise CACHE on every change
 manifest.webmanifest          PWA metadata
 
@@ -664,14 +665,23 @@ is derived by the application anyway.
 
 ### Verification
 
-`offline-check.js` (kept outside the package) is the standing check: it runs
-headless Chromium through every screen, imports a form, prints the documents to
-PDF and measures whether anything is clipped, whether the figures add up and
-whether a single request went to the network.
+`offline-check.js` in the repository root is the standing check. In the spirit
+of the application it has **no dependencies**: the .xlsx fixture is written by
+patching the zip through Node's `zlib`, and headless Chrome is driven over the
+raw DevTools protocol. It needs Node 22+, python3 and Google Chrome — nothing
+is installed.
 
 ```bash
 node offline-check.js
+node offline-check.js --keep   # keep the working folder with the printed PDFs
 ```
+
+What it asserts: every screen opens without a console error; a club form filled
+from the same `form/FSS-Entry-Form.xlsx` that is distributed to clubs imports
+correctly — and **imports twice without creating a duplicate**; the dashboard
+figures equal what is actually in the database; every document type prints to
+PDF with nothing clipped on any sheet; and not a single request leaves the
+local server.
 
 The import fixture is built **from the same form** that is distributed to clubs,
 which incidentally verifies that its sheets and column headers are where the
