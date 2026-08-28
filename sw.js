@@ -15,7 +15,7 @@
  * activate.
  */
 
-const CACHE = 'fss-manager-v61';
+const CACHE = 'fss-manager-v62';
 
 const SHELL = [
   './',

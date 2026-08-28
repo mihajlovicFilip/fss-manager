@@ -1187,7 +1187,37 @@ function onDisciplineFilterChange() {
  * prve tri discipline opraštaju — osim onih koje su ovde označene kao one
  * koje se plaćaju uvek.
  */
-function settingsHtml({ fees }) {
+/** MB ispod gigabajta, cele GB iznad — zauzeće baze je informacija, ne merenje. */
+const storageSize = (bytes) => bytes >= 1073741824
+  ? `${num(Math.round(bytes / 1073741824))} GB`
+  : `${num(Math.max(1, Math.round(bytes / 1048576)))} MB`;
+
+/** Stanje trajnog skladišta za Podešavanja — traži se pri svakom pokretanju. */
+function storageHtml(storage) {
+  if (!storage.supported) {
+    return `
+        <p class="field-note">Ovaj pregledač ne ume da odobri trajno skladište,
+        pa baza deli sudbinu ostalih podataka sajtova. Ne brisati podatke
+        sajta za adresu na kojoj aplikacija radi.</p>`;
+  }
+  const status = storage.persisted
+    ? `
+        <p><strong>Baza je zaštićena od automatskog brisanja.</strong>
+        Pregledač je odobrio trajno skladište, pa je neće obrisati kad bude
+        oslobađao prostor na disku.</p>`
+    : `
+        <div class="notice">Pregledač još nije odobrio trajno skladište, pa
+        bazu sme da obriše kad mu zatreba prostor na disku. Odobrenje se traži
+        pri svakom pokretanju; obično ga donosi instaliranje aplikacije
+        (dugme „Instaliraj“ u traci pregledača).</div>`;
+  return `${status}
+        <p class="field-note">${storage.quota
+    ? `Zauzeto: ${storageSize(storage.usage)} od ${storageSize(storage.quota)} na raspolaganju. `
+    : ''}Ručno brisanje podataka sajta u pregledaču i dalje briše bazu —
+        zaštita važi samo za automatsko oslobađanje prostora.</p>`;
+}
+
+function settingsHtml({ fees, storage }) {
   const groups = AGES.map((age) => `
         <label class="pick">
           <input type="checkbox" data-fee-group="${esc(age.code)}"${
@@ -1243,6 +1273,14 @@ function settingsHtml({ fees }) {
             <div class="picks">${always}</div>
           </div>
         </div>
+      </div>
+    </section>
+
+    <section class="dip-setup" open>
+      <div class="dip-setup-head is-static">
+        <span class="dip-setup-title">Baza podataka</span>
+      </div>
+      <div class="dip-setup-body">${storageHtml(storage)}
       </div>
     </section>
 
@@ -3359,9 +3397,9 @@ async function render() {
       printable = () => resultsSpec({ competition, registry });
     }
   } else if (screen.view === 'settings') {
-    const fees = await store.fees();
+    const [fees, storage] = await Promise.all([store.fees(), store.storageProtection()]);
     feesState = fees;
-    body = settingsHtml({ fees });
+    body = settingsHtml({ fees, storage });
   } else if (screen.view === 'diplomas') {
     const [registry, results, setup] = await Promise.all([
       store.registryFor(competition?.id),
@@ -4031,3 +4069,7 @@ store.ready()
       <p>Ako je aplikacija otvorena u više prozora, zatvori ostale pa osveži ovaj.</p>
     </div>`;
   });
+
+// Zaštita od tihog brisanja se traži odmah pri pokretanju, ne tek kad neko
+// otvori Podešavanja — do tada bi pregledač već mogao da počisti bazu.
+store.ready().then(() => store.storageProtection()).catch(() => {});

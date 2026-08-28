@@ -367,7 +367,7 @@ worse than no list at all.
 | **Rang lista**          | club and age-group rankings, closing the season                              |
 | **Kalendar**            | competitions by month, A and B lists                                         |
 | **Dokumenti**           | entry sheets per club, category and discipline, plus the team and full lists |
-| **Podešavanja**         | entry-fee price list and the free-discipline rule; the rest of the rulebook still lives in `data.js` |
+| **Podešavanja**         | entry-fee price list and the free-discipline rule, plus the storage-protection status of the database; the rest of the rulebook still lives in `data.js` |
 
 Screens are selected by hash route (`#zreb`, `#uvoz` …), so each is linkable and
 survives a reload. An unknown route falls back to the dashboard.
@@ -568,6 +568,13 @@ Three consequences worth knowing:
 3. **Clearing site data deletes the competitions.** There is no backup yet —
    exporting the database is on the list of unbuilt work. Until then, do not
    clear site data for the address the application runs on.
+
+On every launch the application asks the browser to treat its storage as
+**persistent**, so the database is not swept away when the browser frees disk
+space on its own. Whether the browser has granted this — and how much space
+the database takes — is shown under **Podešavanja**. Manually clearing site
+data still deletes everything; persistence only guards against automatic
+eviction.
 
 The database is named `fss-manager`. An earlier misspelling (`fss-menager`) is
 migrated automatically on first launch and then removed.

@@ -543,6 +543,25 @@ export const store = {
     return !!row;
   },
 
+  /**
+   * Zaštita od tihog brisanja. Kad pregledaču zafali prostora na disku, sme
+   * da obriše IndexedDB bez pitanja i bez traga — a u njoj je cela sezona.
+   * `persist()` traži da skladište postane trajno; jednom odobreno važi
+   * trajno, pa se zahtev slobodno ponavlja pri svakom pokretanju. Uz odgovor
+   * ide i zauzeće, da Podešavanja imaju šta da pokažu.
+   */
+  async storageProtection() {
+    if (!navigator.storage?.persist) return { supported: false };
+    let persisted = await navigator.storage.persisted();
+    if (!persisted) persisted = await navigator.storage.persist();
+    let usage = 0;
+    let quota = 0;
+    if (navigator.storage.estimate) {
+      ({ usage = 0, quota = 0 } = await navigator.storage.estimate());
+    }
+    return { supported: true, persisted, usage, quota };
+  },
+
   // ── Takmičenja ───────────────────────────────────────────────────────
 
   async listCompetitions() {
