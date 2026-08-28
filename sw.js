@@ -15,7 +15,7 @@
  * activate.
  */
 
-const CACHE = 'fss-manager-v62';
+const CACHE = 'fss-manager-v63';
 
 const SHELL = [
   './',
@@ -28,6 +28,7 @@ const SHELL = [
   'assets/css/doc-sheet.css',
   'assets/css/documents.css',
   'assets/js/app.js',
+  'assets/js/club-forms.js',
   'assets/js/store.js',
   'assets/js/doc-page.js',
   'assets/js/data.js',

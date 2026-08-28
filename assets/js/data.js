@@ -52,7 +52,7 @@ export const DEMO_VERSION = 6;
  * se pogleda dno navigacije i odmah zna. Podiže se zajedno sa `CACHE` u
  * sw.js.
  */
-export const APP_VERSION = 'v62';
+export const APP_VERSION = 'v63';
 
 export const SEED_COMPETITION = {
   name: 'Prvenstvo Srbije 2026',

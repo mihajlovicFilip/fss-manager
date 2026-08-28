@@ -1509,6 +1509,45 @@ export const store = {
 
   listPeople() { return all('people'); },
 
+  /**
+   * Registar po klubovima — osnova za unapred popunjene formulare prijave.
+   *
+   * Za svako lice se uzima **poslednje poznato stanje**: pojas sa najskorijeg
+   * nastupa (dete napreduje između sezona), grad i trener kluba takođe.
+   * Godište i pol se ne menjaju, pa dolaze sa samog lica.
+   */
+  async clubRoster() {
+    const [register, competitors, competitions] = await Promise.all([
+      all('people'), all('competitors'), all('competitions'),
+    ]);
+    const dateOf = new Map(competitions.map((c) => [c.id, c.date || '']));
+
+    const latest = new Map();
+    competitors.forEach((c) => {
+      if (!c.personId) return;
+      const date = dateOf.get(c.competitionId) || '';
+      const seen = latest.get(c.personId);
+      if (!seen || date >= seen.date) {
+        latest.set(c.personId, { date, belt: c.belt || '', city: c.city || '', coach: c.coach || '' });
+      }
+    });
+
+    const clubs = new Map();
+    register.forEach((p) => {
+      if (!p.club) return;
+      if (!clubs.has(p.club)) clubs.set(p.club, { club: p.club, city: '', coach: '', people: [] });
+      const club = clubs.get(p.club);
+      const last = latest.get(p.id);
+      if (last?.city) club.city = last.city;
+      if (last?.coach) club.coach = last.coach;
+      club.people.push({ name: p.name, year: p.year, sex: p.sex || '', belt: last?.belt || '' });
+    });
+
+    clubs.forEach((club) => club.people.sort((a, b) =>
+      a.name.localeCompare(b.name, 'sr') || a.year - b.year));
+    return [...clubs.values()].sort((a, b) => a.club.localeCompare(b.club, 'sr'));
+  },
+
   // ── Raspored po borilištima ──────────────────────────────────────────
 
   /**
