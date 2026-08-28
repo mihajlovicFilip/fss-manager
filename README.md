@@ -359,7 +359,6 @@ worse than no list at all.
 | **Takmičenja**          | competition register: create, select the current one, delete                 |
 | **Uvoz prijava**        | read completed club forms and write them into the chosen competition         |
 | **Takmičari**           | competitor list with medals and points; a name opens that person's record across all seasons, *Izmeni* corrects an entry and *+ Nova prijava* writes a new one, while entries are open |
-| **Kategorije**          | *planned* — merging small categories and assigning entries by hand           |
 | **Klubovi**             | competitors, medals and points per club                                      |
 | **Žreb / Tabele**       | brackets per category, random draw and printing                              |
 | **Tatami**              | assignment of categories to mats                                             |
@@ -688,10 +687,9 @@ In order of how much each one hurts:
    single competition) does not exist yet.
 4. **The П/П marker** for competitors with special needs, required by the
    official table, has not been introduced.
-5. **The Kategorije screen** remains a plan, with a description of what belongs
-   there. **Podešavanja** now holds the fee price list, but the rest of the
-   rulebook — age groups, disciplines, weight classes — is still edited in
-   `data.js`.
+5. **The rulebook has no screen.** **Podešavanja** holds the fee price list,
+   but the rest of the rulebook — age groups, disciplines, weight classes — is
+   still edited in `data.js`.
 6. **Excel still reports a repair** when the form is opened. The file works
    correctly afterwards — dropdowns, derived columns and checks are all in
    place — but the cause has not been established.

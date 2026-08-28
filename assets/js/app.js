@@ -60,9 +60,6 @@ const SCREENS = [
 
   { id: 'takmicari', label: 'Takmičari', view: 'competitors', title: 'Takmičari' },
 
-  { id: 'kategorije', label: 'Kategorije', title: 'Kategorije',
-    note: 'Formiranje kategorija po grupi, polu i telesnoj težini, spajanje malih kategorija i raspoređivanje prijava.' },
-
   { id: 'klubovi', label: 'Klubovi', view: 'clubs',
     kicker: () => 'Evidencija', title: 'Klubovi' },
 
@@ -94,7 +91,7 @@ const SCREENS = [
 ];
 
 const NAV_MAIN = ['kontrolna-tabla', 'takmicenja', 'uvoz', 'takmicari',
-  'kategorije', 'klubovi', 'zreb', 'tatami', 'rezultati', 'diplome', 'rang',
+  'klubovi', 'zreb', 'tatami', 'rezultati', 'diplome', 'rang',
   'kalendar', 'dokumenti'];
 
 const screenById = (id) => SCREENS.find((s) => s.id === id);
@@ -138,7 +135,7 @@ function checks(registry) {
   if (singles) {
     found.push({
       title: `${singles} ${plural(singles, 'kategorija', 'kategorije', 'kategorija')} sa jednim takmičarem`,
-      action: 'Pregled kategorija →', go: 'kategorije',
+      action: 'Otvori žreb →', go: 'zreb',
     });
   }
 
