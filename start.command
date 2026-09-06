@@ -1,25 +1,25 @@
 #!/bin/bash
-# Pokreće FSS Manager lokalno i otvara ga u pregledaču.
-# Dvoklik na ovaj fajl u Finderu je dovoljan — internet nije potreban.
+# Starts FSS Manager locally and opens it in the browser.
+# A double click in Finder is enough — no internet needed.
 #
-# Zašto server, a ne dvoklik na index.html: pregledači iz bezbednosnih razloga
-# ne učitavaju ES module ni offline keš sa file:// adrese.
+# Why a server and not index.html directly: browsers refuse ES modules
+# and the offline cache over file:// addresses.
 
 cd "$(dirname "$0")" || exit 1
 DIR="$(pwd)"
 
-# Sve što skripta ispiše ide i u start.log pored nje. Prozor Terminala se
-# zatvori i ono što je pisalo u njemu nestane; zapis ostaje, pa se posle može
-# videti šta je zatečeno na portu i šta je od toga urađeno.
+# Everything the script prints also goes to start.log next to it — the
+# Terminal window closes, the log stays, so what was found on the port
+# and what was done about it can be read later.
 exec > >(tee "$DIR/start.log") 2>&1
 
 echo "FSS Manager · $(date '+%d.%m.%Y. %H:%M:%S')"
 echo "Folder: $DIR"
 
-# Pregledač pamti datum svakog fajla i pri sledećem otvaranju pita „ima li
-# nešto novije". Python-ov server na to odgovara sa 304 i ne šalje ništa — pa
-# ako su datumi ostali stari, service worker nikad ne dobije novi sw.js i
-# aplikacija se zauvek drži zatečene verzije. Osvežavanje datuma to prekida.
+# The browser remembers each file's date and asks "anything newer?";
+# Python's built-in server answers 304 and sends nothing — so with stale
+# dates the service worker never receives a new sw.js. Touching the
+# files breaks that.
 find "$DIR" -type f ! -name 'start.log' -exec touch {} + 2>/dev/null
 
 if [ ! -f "$DIR/index.html" ]; then
@@ -30,29 +30,28 @@ if [ ! -f "$DIR/index.html" ]; then
   exit 1
 fi
 
-# Da li neko već sluša na portu? Bash /dev/tcp, bez spoljnih alata.
+# Is somebody already listening on the port? Bash /dev/tcp, no tools.
 port_busy() { (echo > "/dev/tcp/127.0.0.1/$1") >/dev/null 2>&1; }
 
-# Da li na tom portu stoji naša aplikacija ili neki tuđi server?
-# Namerno i sa starim, pogrešno napisanim imenom: server pokrenut iz neke
-# ranije kopije mora da se prepozna kao naš, da bi mogao da se ugasi. Da se ne
-# prepozna, skripta bi ga zaobišla prelaskom na drugi port — a tamo pregledač
-# vidi praznu bazu.
+# Is our app on that port, or some foreign server? The old misspelled
+# name matches on purpose: a server left by an earlier copy must be
+# recognised as ours so it can be stopped — otherwise the script would
+# move to another port, where the browser sees an empty database.
 ours() {
   curl -sf --max-time 2 "http://127.0.0.1:$1/manifest.webmanifest" 2>/dev/null \
     | grep -qE "FSS M[ae]nager"
 }
 
-# Koju verziju služi server na portu. Bez ovoga se dešava da stari server —
-# pokrenut iz nekog ranijeg foldera, a i dalje živ — bude prosto otvoren, pa se
-# u pregledaču vidi stara aplikacija iako je na disku nova.
+# Which version the running server serves. Without this an old server,
+# still alive from an earlier folder, would simply be opened — showing
+# the old app although the disk holds a new one.
 served_version() {
   curl -sf --max-time 2 "http://127.0.0.1:$1/sw.js" 2>/dev/null \
     | grep -o "fss-manager-v[0-9]*" | head -1
 }
 
-# Gasi server na portu. Port se ne menja jer su podaci vezani za njega —
-# stara instanca naše aplikacije se sklanja, ne zaobilazi.
+# Stops the server on the port. The port does not change because the
+# data is bound to it — our old instance is removed, not avoided.
 stop_server() {
   local pids
   pids="$(lsof -ti "tcp:$1" -sTCP:LISTEN 2>/dev/null)"
@@ -68,11 +67,10 @@ stop_server() {
   return 1
 }
 
-# VAŽNO: podaci (takmičenja, prijave) žive u pregledaču vezani za tačnu
-# adresu — localhost:8787 i localhost:8788 su za pregledač dva različita
-# mesta. Zato uvek ciljamo isti port, a menjamo ga samo ako ga drži nešto
-# tuđe; tada se to i kaže naglas, jer se na novom portu neće videti ranije
-# sačuvana takmičenja.
+# IMPORTANT: the data lives in the browser bound to the exact address —
+# localhost:8787 and 8788 are two different places. So the same port is
+# always targeted, changed only when something foreign holds it — and
+# then said out loud, because the new port will not show earlier data.
 PORT=8787
 ALREADY_RUNNING=0
 LOCAL_VERSION="$(grep -o "fss-manager-v[0-9]*" "$DIR/sw.js" | head -1)"
@@ -85,9 +83,9 @@ if port_busy "$PORT"; then
       if stop_server "$PORT"; then
         echo "Stara je ugašena, pokrećem ovu."
       else
-        # Radije nova verzija na drugom portu nego stara na ovom. Baza je
-        # vezana za port, pa se to izričito kaže — ranija takmičenja ostaju
-        # na 8787 i vide se čim se taj port oslobodi.
+        # Better the new version on another port than the old one here.
+        # The database is bound to the port, so this is said explicitly —
+        # earlier competitions stay on 8787 until it frees up.
         echo "Stara verzija se ne da ugasiti sa ovog mesta."
         while port_busy "$PORT"; do
           PORT=$((PORT + 1))
@@ -125,15 +123,15 @@ fi
 
 ADDRESS="http://localhost:$PORT/"
 
-# Adresa nosi oznaku verzije. Bez nje pregledač, kad mu se kaže da otvori već
-# otvorenu adresu, samo prebaci na postojeći jezičak — koji i dalje prikazuje
-# ono što je u njemu bilo. Sa oznakom je to nova adresa, pa se strana zaista
-# učita. Pretraga u adresi se pri čitanju keša ignoriše, tako da ništa drugo
-# ne menja.
+# The URL carries the version. Without it the browser, told to open an
+# already open address, just switches to the existing tab — still showing
+# whatever was there. With the tag it is a new URL, so the page truly
+# loads. The query string is ignored by the cache, so nothing else
+# changes.
 OPEN_URL="$ADDRESS?${LOCAL_VERSION:-v}"
 
-# Otvara pregledač tek kad server zaista odgovori — bez ovoga se dešava da
-# se prozor otvori pre nego što se server podigne.
+# Opens the browser only once the server answers — otherwise the window
+# can open before the server is up.
 open_when_ready() {
   for _ in $(seq 1 60); do
     if port_busy "$PORT"; then
@@ -158,12 +156,11 @@ echo
 
 open_when_ready &
 
-# --bind 127.0.0.1: samo ovaj računar. Time nema ni upozorenja macOS zaštitnog
-# zida o dolaznim vezama. Kad zatreba da se drugi uređaji u hali kače na ovaj
-# laptop, ovde se skida ograničenje.
+# --bind 127.0.0.1: this machine only — no macOS firewall warnings. If
+# other devices in the hall ever need to connect, lift the limit here.
 if command -v python3 >/dev/null 2>&1; then
-  # server.py šalje „no-store", pa pregledač ne može da posluži staru verziju
-  # iz sopstvenog keša. Ugrađeni server to ne ume, pa je rezerva.
+  # server.py sends no-store, so the browser cannot serve an old build
+  # from its own cache. The built-in server cannot, so it is the backup.
   if [ -f "$DIR/server.py" ]; then
     exec python3 "$DIR/server.py" "$PORT" "$DIR"
   fi
@@ -171,7 +168,7 @@ if command -v python3 >/dev/null 2>&1; then
 elif command -v php >/dev/null 2>&1; then
   exec php -S "127.0.0.1:$PORT" -t "$DIR"
 elif command -v node >/dev/null 2>&1; then
-  # npx prvi put povlači paket sa interneta — zato je poslednji izbor.
+  # npx downloads the package on first run — hence the last choice.
   exec npx --yes serve -l "$PORT" "$DIR"
 else
   echo "Nije pronađen nijedan način da se pokrene lokalni server."

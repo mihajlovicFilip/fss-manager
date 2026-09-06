@@ -1,22 +1,14 @@
 /**
- * Štampa iz aplikacije.
+ * Printing from the app.
  *
- * Every list in the app has a Štampaj button, and every one of them ends
- * up here. The rule is simple and it is the whole point of the module:
- * **what goes on paper is what is on the screen.** Search boxes and
- * filters hide rows; the printout drops exactly those rows and names the
- * filter on the sheet, so nobody is left holding a list that quietly
- * omits half a discipline.
+ * Every list has a Štampaj button and all of them end up here. The rule:
+ * what goes on paper is what is on the screen — rows hidden by a filter
+ * are dropped, and the active filter is named on the sheet.
  *
- * How it works. A screen registers a *builder* — a plain function that,
- * called at print time, returns the spec for one document. The button (or
- * a plain Cmd+P) calls it, hands the spec to doc-render.js, drops the
- * result into a hidden <doc-page> and opens the print dialog. The app
- * itself is hidden for print media, the sheet takes its place, and the
- * page never navigates: the dialog opens over the list you were reading.
- *
- * Nothing here knows what a competitor or a club is. Žreb, tatami
- * schedules and rang lista register a builder the same way.
+ * A screen registers a builder: a function that returns the document spec
+ * at print time. The button (or plain Cmd+P) calls it, renders the spec
+ * into a hidden <doc-page> and opens the print dialog. Nothing here knows
+ * what a competitor or a club is.
  */
 
 import { renderInto, renderAllInto, stamp } from './doc-render.js';
@@ -60,21 +52,18 @@ export function setPrintable(fn) {
  * mark comes off and the browser prints the screen as it normally would.
  */
 function prepare() {
-  // Na listu već stoji ceo štos i `window.print()` je ovo i pokrenuo — ne
-  // gazi ga onim što je trenutno na ekranu.
+  // A whole stack is already on the sheet and window.print() started this
+  // — do not overwrite it with the current screen.
   //
-  // Zastavica se **ne** spušta posle `print()` nego tek na sledećem
-  // iscrtavanju (`setPrintable`). Razlog je trka: `beforeprint` i
-  // `afterprint` u nekim pregledačima stižu tek pošto `print()` vrati
-  // kontrolu, i to ne uvek tim redom. Ko spusti zastavicu ranije, dočeka
-  // `beforeprint` bez nje, pokuša da gradi iz ekranskog builder-a (kog na
-  // žrebu nema) i skloni papir taman pred štampu — u PDF-u tada umesto
-  // grane izađe ekran.
+  // The flag is cleared on the next render (setPrintable), not after
+  // print(): beforeprint/afterprint can arrive after print() returns, in
+  // either order, so clearing earlier would rebuild from the screen and
+  // pull the paper away mid-print.
   if (stacked) return true;
   const job = builder?.();
   if (!job || !(job.spec?.rows?.length || job.spec?.leads?.length || job.spec?.board)) {
-    // Ekran bez svog builder-a, a na listu ipak nešto stoji: to je štos koji
-    // je neko upravo pripremio. Ostavi ga.
+    // No builder on this screen, but something is on the sheet: a stack
+    // somebody just prepared. Leave it.
     if (!sheet?.firstElementChild) document.body.classList.remove('is-printing');
     return !!sheet?.firstElementChild;
   }
@@ -96,11 +85,9 @@ export function printNow() {
 
 /**
  * Prints a whole stack in one go — many documents, one print job, each on
- * its own paper with its own page numbering. This is what „Završetak
- * sezone" uses: one list per category, exactly as Filip asked.
- *
- * Bypasses the registered builder on purpose. The stack is assembled at the
- * moment the editor asks for it, not on every render.
+ * its own paper with its own page numbering ("Završetak sezone" prints one
+ * list per category this way). Bypasses the registered builder on purpose:
+ * the stack is assembled when asked for, not on every render.
  *
  * @returns {{documents:number, pages:number}} what actually went to paper
  */
@@ -121,7 +108,7 @@ export function printStack(jobs, orientation = 'portrait') {
 // window.print() lands here as well; rebuilding is cheap and keeps one path.
 window.addEventListener('beforeprint', prepare);
 
-// ── Reading the screen ─────────────────────────────────────────────────
+// === Reading the screen =============================================
 
 /**
  * Is this element still on screen, or did a filter hide it?

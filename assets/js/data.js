@@ -1,22 +1,16 @@
 /**
- * Domain model for the Fudokan savez Srbije TMS.
+ * The rulebook and the demo registry.
  *
- * Everything the official documents print is derived from this module:
- * the federation letterhead, the competition being documented, the
- * age-group / discipline / level / weight matrices, and the entry
- * registry itself.
- *
- * The registry below is a deterministic demo dataset — same seed, same
- * rows on every load, so the printed documents are reproducible. Replace
- * `buildRegistry` with a fetch from the TMS backend and nothing else in
- * this module or in documents.js has to change: the documents only ever
- * read `competitors`, `entries` and `teams`.
+ * Everything the app derives comes from this module: the federation
+ * letterhead, age groups, disciplines, levels, weight classes, placements
+ * and points. The demo registry is deterministic — same seed, same rows
+ * on every load — so the printed documents are reproducible.
  */
 
 export const FEDERATION = {
   name: 'Fudokan savez Srbije',
-  /** Sedište kancelarije saveza — ne mesto održavanja takmičenja (to je
-   *  COMPETITION.place, i menja se od takmičenja do takmičenja). */
+  /** The federation office's seat — not the competition venue (that is
+   *  the competition's own `place`, and changes every time). */
   subtitle: 'Fudokan Federation of Serbia · Leskovac',
   /**
    * Letterhead mark. The grb alone, not the full roundel: at the ~13 mm the
@@ -28,31 +22,18 @@ export const FEDERATION = {
 };
 
 /**
- * Takmičenje kojim se baza puni pri prvom pokretanju. Od tog trenutka
- * takmičenja žive u bazi (store.js) i menjaju se iz aplikacije — ovo je samo
- * seme, da ekran nikad ne krene prazan.
- */
-/**
- * Verzija demo registra. Podiže se kad se `buildRegistry()` promeni tako da
- * stara baza više ne prikazuje ono što aplikacija sad ume — a to se dešava
- * pri svakoj izmeni obima ili oblika demo podataka.
- *
- * Bez ovoga aplikacija ćuti: `seed()` puni bazu samo kad je prazna, pa ko je
- * jednom otvorio staru verziju zauvek gleda stare brojke i s pravom pita
- * „gde su novi takmičari".
+ * Version of the demo registry. Bump it when buildRegistry() changes in a
+ * way an old database cannot show — otherwise seed() only fills an empty
+ * database, and whoever opened an old version keeps seeing old numbers.
  */
 export const DEMO_VERSION = 6;
 
 /**
- * Verzija aplikacije, ispisana u dnu navigacije.
- *
- * Postoji zbog jednog konkretnog gubljenja vremena: kad se folder osveži a
- * pregledač i dalje služi staru verziju iz keša, sa ekrana se to ne vidi —
- * brojke izgledaju „pogrešno" a niko ne zna gleda li novo ili staro. Ovako
- * se pogleda dno navigacije i odmah zna. Podiže se zajedno sa `CACHE` u
- * sw.js.
+ * App version, shown at the bottom of the navigation — the quickest way
+ * to see whether the browser is serving the current build or a cached
+ * one. Bumped together with CACHE in sw.js.
  */
-export const APP_VERSION = 'v64';
+export const APP_VERSION = 'v65';
 
 export const SEED_COMPETITION = {
   name: 'Prvenstvo Srbije 2026',
@@ -66,9 +47,9 @@ export const SEED_COMPETITION = {
 };
 
 /**
- * Odigrano takmičenje kojim se baza takođe puni pri prvom pokretanju, sa
- * upisanim plasmanima. Bez njega se ne bi videlo ono zbog čega ukupan zbir
- * bodova i postoji — sabiranje kroz sezone. Briše se kao i svako drugo.
+ * A finished competition also seeded on first run, with placements — so
+ * the whole point of the running total, points across seasons, is
+ * visible. Deleted like any other.
  */
 export const PAST_COMPETITION = {
   name: 'Prvenstvo Srbije za mlađe uzraste 2025',
@@ -82,8 +63,8 @@ export const PAST_COMPETITION = {
 };
 
 /**
- * Datumi se čuvaju kao ISO (2026-03-14) jer se tako sortiraju i ne zavise od
- * podešavanja računara; na ekran i na papir idu u domaćem obliku.
+ * Dates are stored as ISO (2026-03-14) — they sort correctly and do not
+ * depend on machine settings; screens and paper get the local form.
  */
 export const dateLabel = (iso) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
@@ -91,16 +72,13 @@ export const dateLabel = (iso) => {
 };
 
 /**
- * Plasmani i bodovi. Bodovna skala je pravilnik, ne kod — menja se ovde na
- * jednom mestu i sve što je izračunato iz nje se povuče za njom (bodovi po
- * takmičenju, ukupan zbir, rang lista kad dođe na red).
+ * Placements and points. The scale is rulebook, not code — change it here
+ * and everything derived follows.
  *
- * `medal: true` znači da se plasman broji u medalje; učešće nosi bodove ali
- * nije medalja.
- *
- * `slots` je koliko puta plasman sme da se dodeli u jednoj kategoriji.
- * **Bronzi su dva mesta** — repasaž daje dva treća, i to nije greška nego
- * pravilo. `null` znači bez ograničenja (učešće).
+ * medal: true counts toward the medal column; participation carries
+ * points but is not a medal. slots is how many times a placement may be
+ * awarded in one category — bronze has two on purpose (repechage gives
+ * two thirds); null means unlimited.
  */
 export const PLACEMENTS = [
   { key: 'zlato',  label: 'Zlato',  short: 'Z', place: '1. mesto', medal: true,  points: 100, slots: 1 },
@@ -112,36 +90,27 @@ export const PLACEMENTS = [
 export const placementByKey = (key) => PLACEMENTS.find((p) => p.key === key) || null;
 
 /**
- * Koliko puta jedan plasman sme da se dodeli unutar jedne kategorije.
- * `null` znači neograničeno.
- *
- * Po pravilniku kategorija ima jedno prvo, jedno drugo i dva treća mesta.
- * Discipline koje se ne izvlače nego mere ili boduju — kihon u mestu i
- * tamashiwari — nose `openPlacements`, pa im broj istih plasmana nije ograničen.
+ * How many times one placement may be awarded within a category; null
+ * means unlimited. Disciplines that are scored or measured rather than
+ * drawn (kihon u mestu, tamashiwari) carry openPlacements and have no
+ * limit.
  */
 export const placementSlots = (discipline, key) => {
   if (disciplineByName(discipline)?.openPlacements) return null;
   return placementByKey(key)?.slots ?? null;
 };
 
-/** Bodovi za jedan plasman. Nepoznat ili neupisan plasman ne nosi ništa. */
+/** Points for one placement. Unknown or missing carries nothing. */
 export const pointsFor = (key) => placementByKey(key)?.points || 0;
 
 /**
- * Upis na već odštampanu diplomu.
+ * Writing on a pre-printed diploma.
  *
- * Diplome se štampaju unapred, u tiražu, sa gotovim tekstom i praznim
- * linijama; posle takmičenja se u te linije upisuje ko je šta osvojio. Papir
- * je dakle zadat, a aplikacija na njemu ima samo četiri mesta — i mora da
- * pogodi svako.
- *
- * Zato se ne opisuje izgled nego **položaj**: za svaki red koliko je
- * milimetara od gornje ivice lista, koliko levo (−) ili desno (+) od sredine,
- * i koliko je slovo veliko u tipografskim tačkama. Sve troje meri urednik na
- * svojoj diplomi, jednom, i to ostaje upisano — blanko se ne menja godinama.
- *
- * Ovo su samo početne mere, da polja ne budu prazna: nijedna diploma nije
- * kao druga, pa se prvo štampa probni list sa lenjirom.
+ * Diplomas are printed in advance with blank lines; the app only fills
+ * them in. So what is described here is position, not looks: millimetres
+ * from the top edge, left (−) or right (+) of centre, and type size in
+ * points. The editor measures these once on their own diploma — these
+ * are just starting values, and a test sheet with a ruler prints first.
  */
 export const DIPLOMA_LINES = [
   { key: 'ime',        label: 'Ime i prezime', top: 108, x: 0,   size: 22, caps: true },
@@ -160,19 +129,13 @@ export const DIPLOMA_DEFAULT = {
 };
 
 /**
- * Kotizacije.
+ * Entry fees. A club pays per entry, not per competitor: three
+ * disciplines, three fees. A team pays as a whole; enbu has its own price.
  *
- * Klub plaća po **prijavi, ne po takmičaru**: ko je prijavljen u tri
- * discipline plaća tri kotizacije. Ekipa se plaća kao celina, bez obzira na
- * broj članova, a enbu ima svoj iznos jer je par.
- *
- * Starijim uzrastima savez oprašta prve tri discipline (`free.count` u
- * grupama `free.groups`) — ali ne sve: **tamashiwari i tsumeai se plaćaju
- * uvek**, kao i svaka ekipna prijava. Zato oproštaj ne skida sa ukupnog broja
- * nego samo sa onih disciplina koje smeju da budu besplatne.
- *
- * Iznosi kreću od nule namerno: aplikacija ne izmišlja cenu. Dok se ne unesu
- * u Podešavanjima, list kotizacija to i piše.
+ * Older groups get the first free.count disciplines free (free.groups) —
+ * but tamashiwari and tsumeai are always paid, as is every team entry.
+ * Amounts start at zero on purpose: until they are set in Podešavanja,
+ * the fee sheet says so.
  */
 export const FEES_DEFAULT = {
   individual: 0,
@@ -186,15 +149,15 @@ export const FEES_DEFAULT = {
   },
 };
 
-/** „1.500 din" — dinari, bez para, po domaćem pisanju hiljada. */
+/** "1.500 din" — dinars, no decimals, local thousands format. */
 export const money = (amount) =>
   `${new Intl.NumberFormat('sr-RS').format(Math.round(amount || 0))} din`;
 
 /**
- * Koliko kotizacija duguje jedan takmičar, i koliko mu je oprošteno.
+ * How many fees one competitor owes, and how many are waived.
  *
- * @param {Array} entries pojedinačne prijave tog takmičara
- * @param {object} fees   podešavanje kotizacija
+ * @param {Array} entries the competitor's individual entries
+ * @param {object} fees   fee settings
  */
 export function feeCountFor(entries, fees) {
   const rule = fees?.free || FEES_DEFAULT.free;
@@ -207,11 +170,11 @@ export function feeCountFor(entries, fees) {
   return { entries: entries.length, free, paid: entries.length - free };
 }
 
-/** Ekipna kotizacija: enbu ima svoju cenu, ostale ekipe zajedničku. */
+/** Team fee: enbu has its own price, other teams share one. */
 export const teamFeeOf = (team, fees) =>
   (team?.discipline === 'Enbu' ? (fees?.enbu || 0) : (fees?.team || 0));
 
-/** Rangovi takmičenja — biraju se pri kreiranju novog. */
+/** Competition levels — picked when creating a new one. */
 export const COMPETITION_LEVELS = [
   'Državno prvenstvo',
   'Kup Srbije',
@@ -221,39 +184,34 @@ export const COMPETITION_LEVELS = [
 ];
 
 /**
- * A i B kalendar. Svaka takmičarska godina ima oba: A lista su takmičenja
- * koja ulaze u bodovanje, B lista sve ostalo — turniri, memorijali, susreti
- * koji se odigraju i upišu, ali ne pomeraju rang listu.
- *
- * Plasman sa B liste je i dalje plasman i medalja je i dalje medalja; samo
- * bodovi ne teku iz njega. Zato se ovo nigde ne pretvara u brisanje podataka,
- * već samo u uslov pri sabiranju.
+ * A and B calendars. A-list competitions count toward ranking points;
+ * B-list ones (tournaments, memorials) are recorded but move nothing.
+ * A B-list placement is still a placement and a medal still a medal —
+ * only the points do not flow, so this is a condition when summing,
+ * never a deletion.
  */
 export const CALENDARS = [
   { key: 'A', label: 'A lista', note: 'ulazi u bodovanje', scores: true },
   { key: 'B', label: 'B lista', note: 'ne ulazi u bodovanje', scores: false },
 ];
 
-/** Takmičenje bez oznake broji se kao A — tako je i bilo pre uvođenja liste. */
+/** A competition with no calendar counts as A — as before the lists. */
 export const calendarOf = (competition) =>
   (competition?.calendar === 'B' ? 'B' : 'A');
 
 /**
- * Da li bodovi sa tog takmičenja teku u trajnu evidenciju.
- *
- * Dva uslova, i oba su ista odluka posmatrana sa dve strane: takmičenje mora
- * da bude **na A listi** i mora da bude **zatvoreno**. Dok traje, plasman se
- * unosi i medalja se broji kao i svuda — ali bodovi stoje, jer se do
- * poslednje kategorije još sve može ispraviti. Zatvaranje takmičenja je
- * trenutak knjiženja.
+ * Whether points from a competition flow into the permanent record: it
+ * must be A-list and closed. While it runs, placements and medals are
+ * recorded, but points wait — everything can still be corrected until
+ * the last category. Closing the competition is the moment of booking.
  */
 export const pointsCounted = (competition) =>
   calendarOf(competition) === 'A' && competition?.status === 'Završeno';
 
 /**
- * Dok su prijave otvorene, spisak takmičara se menja i dopunjuje; od
- * „Prijave zatvorene" nadalje je zamrznut, pa je ono što je odštampano i ono
- * što je u bazi ista stvar. Vraćanjem prijava se opet otključava.
+ * While entries are open the competitor list can change; from "Prijave
+ * zatvorene" on it is frozen, so what is printed and what is in the
+ * database are the same thing. Reopening entries unlocks it again.
  */
 export const ENTRIES_OPEN = ['Nacrt', 'Prijave otvorene'];
 export const entriesOpen = (competition) =>
@@ -264,29 +222,21 @@ export const MONTHS = [
   'jul', 'avgust', 'septembar', 'oktobar', 'novembar', 'decembar',
 ];
 
-/** Stanja kroz koja takmičenje prolazi. Novo uvek kreće kao nacrt. */
+/** States a competition passes through. A new one starts as a draft. */
 export const COMPETITION_STATUSES = ['Nacrt', 'Prijave otvorene', 'Prijave zatvorene', 'Završeno'];
 
 /**
-/**
- * Uzrasne grupe.
+ * Age groups.
  *
- * The codes are the federation's A–J sequence. The rulebook writes them in
- * Cyrillic (А Б Ц Д Е Ф Г Х И Ј); they are stored and printed in Latin here
- * because Barlow carries no Cyrillic, so on paper those ten capitals fell
- * back to a system font and set about twice as wide as the text around them.
- * The letters and their order are unchanged — only the script.
+ * The codes are the federation's A–J sequence, stored in Latin because
+ * Barlow carries no Cyrillic — on paper those capitals would fall back to
+ * a system font twice as wide.
  *
- * **Grupe se vezuju za uzrast, ne za godišta.** Zvanična tabela saveza je
- * ispisana godištima („2019. i mlađi = poletarci"), ali se svake sezone cela
- * pomeri tačno za jednu godinu — 2025. su poletarci bili 2018. i mlađi, 2026.
- * su 2019. i mlađi. Ono što se ne menja je **uzrast**: poletarac je onaj ko u
- * toj godini puni najviše sedam. Zato ovde stoji uzrast, a godišta se računaju
- * iz njega za svaku sezonu posebno — i tabela se nikad više ne prepisuje rukom.
- *
- * Sezona je **godina takmičenja**, ne današnji datum: takmičenje iz 2025. i
- * dalje razvrstava po tabeli iz 2025, pa se stari rezultati ne premeštaju u
- * druge kategorije kad pređe Nova godina.
+ * Groups are tied to age, not to birth years. The official table is
+ * written in years ("2019 and younger"), but it shifts by one every
+ * season; the age is what stays. Birth years are computed per season, so
+ * the table is never retyped — and the season is the competition's year,
+ * not today's date, so old results never move category at New Year.
  */
 export const AGES = [
   { code: 'A', name: 'Poletarci',       from: 0,  to: 7 },
@@ -301,24 +251,24 @@ export const AGES = [
   { code: 'J', name: 'Veterani',        from: 50, to: 120 },
 ];
 
-/** Tekuća takmičarska godina — sezona kad se ne kaže koja. */
+/** The current competition year — the season when none is given. */
 export const SEASON = () => new Date().getFullYear();
 
-/** Godina takmičenja; bez datuma pada na tekuću. */
+/** The competition's year; falls back to the current one. */
 export const seasonOf = (competition) =>
   Number(String(competition?.date || '').slice(0, 4)) || SEASON();
 
-/** Godišta koja jedna grupa obuhvata u datoj sezoni — najmlađe pa najstarije. */
+/** Birth years a group covers in a season — youngest and oldest. */
 export const yearsOf = (age, season = SEASON()) => ({
   najmladje: season - age.from,
   najstarije: season - age.to,
 });
 
-/** „2019. i mlađi", „2018/2017", „2010–2008", „1976. i stariji". */
+/** "2019. i mlađi", "2018/2017", "2010–2008", "1976. i stariji". */
 export function yearsLabel(age, season = SEASON()) {
   const { najmladje, najstarije } = yearsOf(age, season);
-  // Otvorena grupa se piše svojom **jedinom pravom granicom**: poletarci
-  // najstarijim godištem koje primaju, veterani najmlađim.
+  // An open-ended group is written by its one real boundary: poletarci
+  // by the oldest year they accept, veterans by the youngest.
   if (age.from === 0) return `${najstarije}. i mlađi`;
   if (age.to >= 100) return `${najmladje}. i stariji`;
   if (najmladje - najstarije === 1) return `${najmladje}/${najstarije}`;
@@ -326,60 +276,43 @@ export function yearsLabel(age, season = SEASON()) {
 }
 
 /**
- * Matrica disciplina — jedini izvor istine o tome koja je prijava dozvoljena.
- * Ništa u aplikaciji ne zna spisak disciplina mimo ove liste, pa nijedan
- * dokument ne može da odštampa Kobudo za poletarca.
+ * The discipline matrix — the only source of truth for what may be
+ * entered. Copied from the federation's official table for season 2026.
+ * Veterans (J) have no team disciplines, as the table's header says.
  *
- * Prepisano iz zvanične tabele saveza za sezonu 2026: `+` znači da grupa sme u
- * tu disciplinu, `−` i prazno polje da ne sme. **Za veterane (J) ne važe ekipne
- * discipline** — nijedna, ni enbu ni timovi, kako i piše u zaglavlju tabele.
+ * Traditional disciplines carry no marker; Fudokan sport ones carry
+ * style: 'sport'. Easy to miss: traditional kumite has no weight classes
+ * (open category), sport kumite does — which is why drawBy sits on the
+ * discipline instead of a name-based rule.
  *
- * Dve porodice discipline dele ovu listu. **Tradicionalne** su one iz
- * zvanične tabele i ne nose nikakvu oznaku — one su podrazumevane.
- * **Fudokan sport** discipline nose `style: 'sport'` i ime im tako i glasi,
- * pa se na svakom spisku i filteru razlikuju bez ijedne dodatne kolone.
+ * ADDING A DISCIPLINE: append one object; dashboards, checks, filters
+ * and printed lists pick it up on their own.
  *
- * Razlika koja se lako previdi: **tradicionalni kumite nema telesne težine** — sve je
- * apsolutna kategorija, pa se telesna težina uz njega i ne piše. **Sportski kumite
- * ima telesne težine.** Zato `drawBy` stoji na disciplini, a ne pravilo tipa „ako se
- * zove kumite".
+ *   name    — as written on official lists; must be unique
+ *   kind    — 'P' individual, 'E' team, 'P/E' both
+ *   system  — competition system, printed under the category list
+ *   drawBy  — what splits categories within group and sex: 'weight',
+ *             'level', 'variant', or null (the whole group is one)
+ *   style   — 'sport' for Fudokan sport disciplines
+ *   team    — { min, max } members for team disciplines
+ *   variants— team variants that compete separately; pattern is the
+ *             sex make-up (enbu: men's pair and mixed pair)
+ *   groups  — AGES codes the discipline is open to
+ *   order   — order on lists and in menus
+ *   note    — an extra rulebook restriction, if any
  *
- * DODAVANJE DISCIPLINE: dopiši jedan objekat u listu. Ništa drugo se ne dira —
- * kontrolna tabla, provere, filteri i štampani spiskovi je pokupe same.
- *
- *   { name: 'Kihon kata', kind: 'P', system: 'Bodovanje (flag system)',
- *     drawBy: null, groups: 'CDE', order: 13 }
- *
- *   name    — kako se piše na zvaničnim listama; ovim se disciplina i
- *             prepoznaje, pa mora biti jedinstveno
- *   kind    — 'P' pojedinačno, 'E' ekipno, 'P/E' i jedno i drugo
- *   system  — sistem takmičenja, ide u podnaslov liste po kategoriji
- *   drawBy  — po čemu se kategorije dele unutar grupe i pola:
- *             'weight' po telesnoj težini (grupa mora imati telesne težine u WEIGHTS),
- *             'level' po nivou pojasa, 'variant' po vrsti para/ekipe,
- *             `null` nikako — cela grupa je jedna kategorija
- *   style   — 'sport' za fudokan sport discipline; tradicionalne se ne
- *             označavaju, one su podrazumevane
- *   team    — { min, max } za ekipne discipline: koliko takmičara čini ekipu
- *   variants— vrste ekipe koje se odvojeno takmiče; `pattern` je sastav po
- *             polu. Enbu ih ima dve: muški par i mešoviti
- *   groups  — šifre uzrasnih grupa iz AGES kojima je disciplina otvorena
- *   order   — redosled na listama i u padajućim menijima
- *   note    — dodatno ograničenje iz pravilnika, ako ga ima (opciono)
- *
- * Isto važi i za uzrasne grupe (AGES) i telesne težine (WEIGHTS) — sve troje su
- * pravilnik, ne kod. Ekran „Podešavanja" je mesto gde ovo jednog dana treba
- * da se menja iz aplikacije, bez otvaranja fajla.
+ * AGES and WEIGHTS are rulebook too, not code. The Podešavanja screen is
+ * where this should one day be edited from the app.
  */
 export const DISCIPLINES = [
-  // ── Tradicionalne ────────────────────────────────────────────────────
+  // === Traditional =============================================
   { name: 'Kate',                 kind: 'P/E', system: 'Eliminacija po nivoima',   drawBy: 'level',  groups: 'ABCDEFGHIJ', order: 1 },
   { name: 'Kihon u mestu',        kind: 'P',   system: 'Bodovanje (flag system)',  drawBy: null,     groups: 'A',          order: 2, note: 'samo 9. i 8. kyu', openPlacements: true },
   { name: 'Kihon kumite',         kind: 'P',   system: 'Bodovanje (flag system)',  drawBy: null,     groups: 'ABCD',       order: 3 },
   { name: 'Kihon ippon kumite',   kind: 'P',   system: 'Bodovanje (flag system)',  drawBy: null,     groups: 'AB',         order: 4 },
   { name: 'Jiu ippon kumite',     kind: 'P',   system: 'Bodovanje (flag system)',  drawBy: null,     groups: 'CD',         order: 5 },
   { name: 'Jiu ippon kumite tim', kind: 'E',   system: 'Bodovanje (flag system)',  drawBy: null,     groups: 'CD',         order: 6, team: { min: 3, max: 4 } },
-  // Enbu je par, i realno su to dva takmičenja: muški par i mešoviti.
+  // Enbu is a pair, and really two competitions: men's and mixed.
   { name: 'Enbu',                 kind: 'E',   system: 'Bodovanje (flag system)',  drawBy: 'variant', groups: 'ABCDEFGHI', order: 7,
     team: { min: 2, max: 2 },
     variants: [
@@ -389,27 +322,27 @@ export const DISCIPLINES = [
   { name: 'Ko go kumite',         kind: 'P',   system: 'Direktna eliminacija',     drawBy: null,     groups: 'EF',         order: 8 },
   { name: 'Ko go kumite tim',     kind: 'E',   system: 'Direktna eliminacija',     drawBy: null,     groups: 'EF',         order: 9, team: { min: 3, max: 4 } },
   { name: 'Fuku go',              kind: 'P',   system: 'Kombinovano bodovanje',    drawBy: null,     groups: 'EFGHIJ',     order: 10 },
-  // Tradicionalni kumite je apsolutna kategorija — bez telesna težina.
+  // Traditional kumite is an open category — no weight classes.
   { name: 'Kumite',               kind: 'P',   system: 'Eliminacija sa repasažom', drawBy: null,     groups: 'GHIJ',       order: 11 },
   { name: 'Kumite tim',           kind: 'E',   system: 'Eliminacija sa repasažom', drawBy: null,     groups: 'GHI',        order: 12, team: { min: 3, max: 4 } },
   { name: 'Tsumeai',              kind: 'P',   system: 'Direktna eliminacija',     drawBy: null,     groups: 'HIJ',        order: 13 },
   { name: 'Tamashiwari',          kind: 'P',   system: 'Bodovanje (merenje)',      drawBy: null,     groups: 'GHIJ',       order: 14, openPlacements: true },
   { name: 'Kobudo',               kind: 'P',   system: 'Bodovanje (flag system)',  drawBy: null,     groups: 'FGHIJ',      order: 15 },
 
-  // ── Fudokan sport ────────────────────────────────────────────────────
+  // === Fudokan sport =============================================
   { name: 'Fudokan sport kate',       kind: 'P', style: 'sport', system: 'Eliminacija po nivoima',   drawBy: 'level',  groups: 'ABCDEFGHIJ', order: 20 },
   { name: 'Fudokan sport kumite',     kind: 'P', style: 'sport', system: 'Eliminacija sa repasažom', drawBy: 'weight', groups: 'ABCDEFGHIJ', order: 21 },
   { name: 'Fudokan sport kata tim',   kind: 'E', style: 'sport', system: 'Eliminacija po nivoima',   drawBy: null,     groups: 'ABCDEFGHI',  order: 22, team: { min: 3, max: 3 } },
   { name: 'Fudokan sport kumite tim', kind: 'E', style: 'sport', system: 'Eliminacija sa repasažom', drawBy: null,     groups: 'ABCDEFGHI',  order: 23, team: { min: 3, max: 4 } },
 ];
 
-/** Fudokan sport discipline; tradicionalne se ne označavaju posebno. */
+/** Fudokan sport disciplines; traditional ones carry no marker. */
 export const isSport = (discipline) => discipline?.style === 'sport';
 
-/** Ekipne discipline nose `team`; pojedinačne ga nemaju. */
+/** Team disciplines carry `team`; individual ones do not. */
 export const isTeamDiscipline = (discipline) => !!discipline?.team;
 
-/** „3 takmičara" ili „3–4 takmičara" — sastav ekipe, za spiskove. */
+/** "3 takmičara" or "3–4 takmičara" — team size, for lists. */
 export const teamSizeLabel = (discipline) => {
   const t = discipline?.team;
   if (!t) return '';
@@ -418,19 +351,17 @@ export const teamSizeLabel = (discipline) => {
 };
 
 /**
- * Vrste ekipe koje se odvojeno takmiče.
- *
- * Disciplina bez izričitih varijanti ima dve podrazumevane — mušku i žensku,
- * jer je ekipa inače jednog pola. Enbu ih ima svoje: muški i mešoviti par, a
- * mešoviti par **nema pol**, pa se kategorija za njega deli po vrsti para a
- * ne po polu.
+ * Team variants that compete separately. A discipline without explicit
+ * variants gets the default two, men's and women's. Enbu has its own:
+ * men's pair and mixed pair — and a mixed pair has no sex, so its
+ * category splits by variant instead.
  */
 export const teamVariants = (discipline) => discipline?.variants || [
   { key: 'M', label: 'muškarci', sex: 'M' },
   { key: 'Ž', label: 'žene', sex: 'Ž' },
 ];
 
-/** „Grupa C · pioniri · mešoviti par" — kategorija jedne ekipe. */
+/** "Grupa C · pioniri · mešoviti par" — one team's category. */
 export const teamCategoryLabel = (team) => {
   const age = ageByCode(team.group);
   return [`Grupa ${team.group}`, age ? age.name.toLowerCase() : null, team.variantLabel]
@@ -446,7 +377,7 @@ export const LEVELS = [
   { level: '3. nivo', belts: ['braon', 'crni'] },
 ];
 
-/** Telesne težine i trajanje meča po uzrasnoj grupi. */
+/** Weight classes and bout length per age group. */
 export const WEIGHTS = {
   'A': { M: ['30', '40', '+40'], 'Ž': ['30', '35', '+35'], bout: '60 s' },
   'B': { M: ['35', '40', '+40'], 'Ž': ['35', '40', '+40'], bout: '60 s' },
@@ -479,13 +410,13 @@ export const CLUBS = [
 /** The club whose entry form the "Prijava kluba" document is printed for. */
 export const HOME_CLUB = 'KK Banatski cvet';
 
-// ── Lookups ────────────────────────────────────────────────────────────
+// === Lookups =============================================
 
 export const ageByCode = (code) => AGES.find((a) => a.code === code) || null;
 export const clubByName = (name) => CLUBS.find((c) => c.name === name) || null;
 export const disciplineByName = (name) => DISCIPLINES.find((d) => d.name === name) || null;
 
-/** The uzrasna grupa a birth year falls into. */
+/** The age group a birth year falls into. */
 export const groupOfYear = (year, season = SEASON()) => {
   const uzrast = season - year;
   const age = AGES.find((a) => uzrast >= a.from && uzrast <= a.to);
@@ -503,20 +434,13 @@ export const disciplinesForGroup = (code) =>
   DISCIPLINES.filter((d) => d.groups.indexOf(code) >= 0);
 
 /**
- * Ime kako se piše, bez obzira kako je otkucano.
+ * A name written the way names are written, however it was typed:
+ * "MARKO MARKOVIĆ" and "marko marković" both become "Marko Marković",
+ * hyphenated surnames included. toLocaleUpperCase('sr') keeps "đ" → "Đ"
+ * correct, and only the first letter is raised ("njegoš" → "Njegoš").
  *
- * Klubovi kucaju kako stignu — „MARKO MARKOVIĆ", „marko marković", „Marko
- * MARKOVIĆ". Na papiru to izgleda kao tri različita čoveka, pa se svako ime
- * pre upisa svodi na isti oblik: **veliko samo prvo slovo svakog dela**, i
- * posle crtice u prezimenu („Marić-Petrović").
- *
- * Domaća azbuka se poštuje kroz `toLocaleUpperCase('sr')` — inače „đ" ne bi
- * postalo „Đ". Dvoslovi ostaju kako treba sami od sebe: uvećava se samo prvo
- * slovo, pa je „njegoš" → „Njegoš", a ne „NJegoš".
- *
- * Ovo **ne rešava dvostruki upis** — lice se i tako prepoznaje bez obzira na
- * veličinu slova (`identityOf` poredi mala slova). Rešava kako ime izgleda na
- * spisku, diplomi i računu.
+ * This does not deduplicate — identity compares in lower case anyway.
+ * It fixes how the name reads on a list, a diploma and a bill.
  */
 export const properName = (value) => String(value ?? '')
   .trim()
@@ -529,13 +453,10 @@ export const properName = (value) => String(value ?? '')
 export const surnameOf = (fullName) => fullName.slice(fullName.lastIndexOf(' ') + 1);
 
 /**
- * Kategorija u kojoj se prijava izvlači. Po čemu se deli govori `drawBy` na
- * samoj disciplini — po telesnoj težini, po nivou pojasa, ili nikako. Ovo je ono što
- * se broji kad negde piše „koliko kategorija", i na tabli i na papiru.
- *
- * Namerno se čita iz pravilnika, a ne iz imena discipline: tradicionalni i
- * sportski kumite se isto zovu „kumite" a dele se različito — tradicionalni
- * nikako (apsolutna), sportski po telesnoj težini.
+ * The category an entry is drawn in — split by the discipline's drawBy:
+ * weight, belt level, or nothing. This is what counts as "a category"
+ * everywhere, on screen and on paper. Read from the rulebook, not the
+ * discipline name, because the two kumites split differently.
  */
 export const categoryKey = (e) => {
   const drawBy = disciplineByName(e.discipline)?.drawBy;
@@ -544,7 +465,7 @@ export const categoryKey = (e) => {
   return `${e.discipline}|${e.group}|${e.sex}`;
 };
 
-// ── Demo registry ──────────────────────────────────────────────────────
+// === Demo registry =============================================
 
 /** Deterministic LCG — the printed documents must not change between loads. */
 function seeded(seed) {
@@ -561,9 +482,9 @@ function seeded(seed) {
 }
 
 /**
- * Godište za demo takmičara. Krajnje grupe su otvorene s jedne strane
- * (poletarci „2018. i mlađi", veterani „1975. i stariji"), pa se za uzorak
- * sužavaju na životan raspon umesto na granicu iz tabele.
+ * A demo competitor's birth year. Edge groups are open on one side, so
+ * the sample narrows them to a lifelike range instead of the table's
+ * boundary.
  */
 const sampleYears = (age, season = SEASON()) => {
   const { najmladje, najstarije } = yearsOf(age, season);
@@ -576,19 +497,9 @@ const LAST = ['Jovanović', 'Petrović', 'Nikolić', 'Stanković', 'Ilić', 'Mar
 
 
 /**
- * Builds the entry registry for the current competition.
- *
- * @returns {{competitors: Array, entries: Array, teams: Array}}
- *   `entries` is one row per prijava — a competitor entered in one
- *   discipline. That is the unit every document counts and prints.
- */
-/**
- * Nivoi pojasa koji na jednom prvenstvu zaista izlaze u datoj uzrasnoj grupi.
- *
- * Beli pojas ne postoji među seniorima, kao ni crni među poletarcima — a
- * kategorija po nivou koja bi imala dva takmičara nije kategorija. Dva nivoa
- * po grupi drže svaku kate kategoriju popunjenom, a broj ljudi na prvenstvu
- * u granicama u kojima zaista jeste.
+ * Belt levels that realistically appear in each age group — no white
+ * belts among seniors, no black among poletarci. Two levels per group
+ * keep every kata category filled and the head count lifelike.
  */
 const LEVELS_BY_GROUP = {
   A: ['0. nivo', '1. nivo'],
@@ -603,7 +514,7 @@ const LEVELS_BY_GROUP = {
   J: ['2. nivo', '3. nivo'],
 };
 
-/** Pojas kojim se jedan nivo predstavlja — nivo je ono po čemu se kate izvlači. */
+/** Belts representing a level — kata is drawn by level, not belt. */
 const BELT_FOR_LEVEL = {
   '0. nivo': ['beli'],
   '1. nivo': ['žuti', 'oranž'],
@@ -611,17 +522,14 @@ const BELT_FOR_LEVEL = {
   '3. nivo': ['braon', 'crni'],
 };
 
-/**
- * Ime pod kojim ekipa izlazi na spisak i u granu.
- *
- * Ekipa nema svoje ime — nastupa pod imenom kluba. Kad klub prijavi **dve u
- * istoj kategoriji**, obe dobijaju broj („KK Niš 1", „KK Niš 2"); dok je
- * jedna, broj bi bio samo šum. Kategorija je ovde disciplina + uzrasna grupa
- * + vrsta ekipe, jer se u toj kutiji i sreću.
- */
-/** Redni broj ekipe se piše rimski — „KK Niš II", kako stoji i na diplomi. */
+/** Team numbers are written in roman — "KK Niš II", as on the diploma. */
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
 
+/**
+ * The name a team competes under. A team has no name of its own — it
+ * carries the club's, with a roman numeral when the club enters more
+ * than one team in the same category (discipline + group + variant).
+ */
 export function labelTeams(teams) {
   const counts = new Map();
   const key = (t) => `${t.discipline}|${t.group}|${t.variant || t.sex}|${t.club}`;
@@ -639,19 +547,13 @@ export function labelTeams(teams) {
 }
 
 /**
- * Registar prijava za jedno prvenstvo.
+ * The demo entry registry for one championship.
  *
- * Gradi se **od kategorija naniže, ne od ljudi naviše.** Prvo se ispiše
- * spisak kategorija koje po pravilniku uopšte postoje — kate po nivou,
- * kumite po telesnoj težini, ostalo po grupi i polu — pa se svaka popuni sa 10 do 15
- * takmičara. Tako nijedna kategorija ne ostane sa dva prijavljena, što je
- * ono što se u praksi i dešava kad se registar pravi obrnuto.
- *
- * Ljudi se **ponovo koriste** kroz discipline: kategorija prvo uzme onoga ko
- * je već prijavljen a ispunjava uslov (isti nivo za kate, ista telesna težina za
- * kumite), i tek kad takvih nema pravi novog. Zato prvenstvo sa hiljadu i po
- * prijava stane u pet stotina ljudi — jedan takmičar nastupa u tri discipline
- * u proseku, kao i uživo.
+ * Built from categories down, not from people up: first the list of
+ * categories the rulebook allows, then each filled with 10–15
+ * competitors — so no category ends up with two entrants. People are
+ * reused across disciplines, so 1500 entries fit in about 500 people,
+ * as in real life.
  *
  * @returns {{competitors: Array, entries: Array, teams: Array}}
  */
@@ -660,7 +562,7 @@ export function buildRegistry(seed = 7) {
   const competitors = [];
   const entries = [];
 
-  /** Koliko prijava ide u jednu kategoriju. */
+  /** How many entries go into one category. */
   const target = () => rng.int(10, 15);
 
   const makeCompetitor = (sex, group, level, weight) => {
@@ -678,8 +580,8 @@ export function buildRegistry(seed = 7) {
       coach: club.coach,
       belt: rng.pick(BELT_FOR_LEVEL[level]),
       level,
-      // Telesna težina je osobina takmičara, ne prijave: isti čovek ne može da se
-      // pojavi u dve telesne težine, pa se bira jednom i nosi kroz sve nastupe.
+      // Weight belongs to the competitor, not the entry: one person
+      // cannot appear in two weight classes.
       weight,
       disciplines: new Set(),
     };
@@ -717,15 +619,14 @@ export function buildRegistry(seed = 7) {
       const pool = [];
 
       /**
-       * Popuni jednu kategoriju. `matches` je uslov koji takmičar mora da
-       * ispuni da bi uopšte mogao u nju (nivo za kate, telesna težina za kumite);
-       * `make` pravi novog kad postojećih nema dovoljno.
+       * Fills one category. `matches` is the condition a competitor must
+       * meet (level for kata, weight for kumite); `make` creates a new
+       * one when there are not enough.
        */
       const fill = (discipline, weight, matches, make) => {
         const want = target();
-        // Prvi na redu je onaj sa najmanje dosadašnjih nastupa. Bez toga bi
-        // šačica prvonapravljenih pokupila sve discipline, a ostatak ostao
-        // sa jednim nastupom — što nije ni ravnomerno ni nalik istini.
+        // The one with the fewest entries so far goes first — otherwise
+        // a handful of early competitors would collect every discipline.
         const free = pool
           .filter((c) => matches(c) && !c.disciplines.has(discipline))
           .sort((a, b) => a.disciplines.size - b.disciplines.size || a.id - b.id);
@@ -735,8 +636,8 @@ export function buildRegistry(seed = 7) {
         }
       };
 
-      // Discipline koje dele ljude po nivou idu prve — one prave takmičare
-      // sa određenim nivoom, pa se svi ostali nastupi slažu preko njih.
+      // Level-drawn disciplines go first — they create competitors with
+      // a set level, and every other entry builds on them.
       const byLevel = allowed.filter((d) => d.drawBy === 'level');
       const rest = allowed.filter((d) => d.drawBy !== 'level');
 
@@ -748,7 +649,7 @@ export function buildRegistry(seed = 7) {
       });
 
       rest.forEach((discipline) => {
-        // Ekipne discipline nemaju pojedinačne prijave — ekipa je učesnik.
+        // Team disciplines have no individual entries — the team enters.
         if (discipline.team) return;
         if (discipline.drawBy === 'weight') {
           weights.forEach((weight) => {
@@ -763,28 +664,23 @@ export function buildRegistry(seed = 7) {
     });
   });
 
-  // Radna oznaka disciplina je poslužila punjenju; zapis takmičara je nosi
-  // dalje bez razloga, a Set ne preživi ni kloniranje ni upis u bazu.
+  // The working discipline set served the filling; a Set survives
+  // neither cloning nor a database write, so it goes.
   competitors.forEach((c) => { delete c.disciplines; });
 
-  // ── Ekipe ────────────────────────────────────────────────────────────
+  // === Teams =============================================
   //
-  // Ekipne discipline nemaju pojedinačne prijave — učesnik je ekipa. Sastav
-  // se uzima iz već napravljenih takmičara **istog kluba i iste uzrasne
-  // grupe**, jer ekipa i jeste to.
-  //
-  // Pol nije uvek osobina ekipe: enbu ima mešoviti par, koji nema pol nego
-  // vrstu. Zato se ekipe prave po **varijanti** (`teamVariants`), a ne po
-  // polu — disciplina bez izričitih varijanti dobija dve podrazumevane,
-  // mušku i žensku, pa je stara podela i dalje tu, samo izražena opštije.
+  // The team is the entrant. Members come from already-created
+  // competitors of the same club and age group. Teams are built per
+  // variant (teamVariants), not per sex — enbu's mixed pair has a
+  // variant instead of a sex.
   const teams = [];
   const teamDisciplines = DISCIPLINES.filter((d) => d.team);
 
   /**
-   * Bira sastav ekipe iz kluba. `pattern` traži tačno određene polove
-   * (muški par, mešoviti par); bez njega se uzima traženi broj takmičara
-   * jednog pola. Imena moraju biti različita — dvoje istoimenih na spisku
-   * izgleda kao greška u unosu i kad su to dva različita čoveka.
+   * Picks a team from one club. `pattern` demands exact sexes (men's
+   * pair, mixed pair); without it, the size in one sex. Names must
+   * differ — two same names on a list read as a typing error.
    */
   const pickTeam = (mates, size, variant, taken) => {
     const used = new Set();
@@ -813,9 +709,8 @@ export function buildRegistry(seed = 7) {
 
     teamDisciplines.forEach((discipline) => {
       if (discipline.groups.indexOf(age.code) < 0) return;
-      // Ko je već u nekoj ekipi ove discipline ne ulazi u drugu — ni u drugu
-      // ekipu iste vrste, ni u drugu vrstu. Enbu ima muški i mešoviti par;
-      // isti čovek ne nastupa u oba.
+      // Whoever is already in a team of this discipline enters no other
+      // — enbu has men's and mixed pairs, one person competes in one.
       const takenIn = new Map();
       const takenFor = (club) => {
         if (!takenIn.has(club)) takenIn.set(club, new Set());
@@ -824,10 +719,9 @@ export function buildRegistry(seed = 7) {
 
       teamVariants(discipline).forEach((variant) => {
         [...byClub.values()].forEach((mates) => {
-          // Ne prijavljuje svaki klub ekipu u svakoj kategoriji — ekipa traži
-          // ljude koji su tu i spremni, a to se ne poklopi svaki put.
+          // Not every club enters a team in every category.
           if (rng.next() > 0.4) return;
-          // Jak klub ume da prijavi i drugu ekipu u istoj kategoriji.
+          // A strong club may enter a second team in the same category.
           const taken = takenFor(mates[0].club);
           const howMany = rng.next() < 0.25 ? 2 : 1;
           for (let n = 0; n < howMany; n++) {
@@ -839,7 +733,7 @@ export function buildRegistry(seed = 7) {
               id: teams.length + 1,
               discipline: discipline.name,
               group: age.code,
-              // Mešoviti par nema pol — vrsta para je ono što ga određuje.
+              // A mixed pair has no sex — the variant defines it.
               sex: variant.sex || '',
               variant: variant.key,
               variantLabel: variant.label,

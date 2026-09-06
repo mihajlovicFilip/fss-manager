@@ -1,53 +1,37 @@
 #!/usr/bin/env python3
 """
-Pravi Excel formular kojim klubovi prijavljuju takmičare.
+Builds the Excel entry form the clubs fill in.
 
-Formular je **zaseban fajl**: savez ga pošalje klubovima, treneri ga popune u
-Excelu i vrate, a aplikacija ih uveze. Klubovi aplikaciju ne otvaraju.
+Three rules hold the form together:
 
-Tri pravila drže formular:
+- Nothing that can be a menu is typed: year, sex, belt, discipline,
+  weight and team variant are dropdowns. Only club, city, coach and
+  names are typed, because the rulebook does not know them.
+- Age is computed, not entered: group and age name are formulas from the
+  birth year, and the discipline menu depends on the group.
+- Writing goes only where intended: the sheet is locked except for the
+  input fields.
 
-**Sve što ne mora da se kuca — ne kuca se.** Godište, pol, pojas, disciplina,
-telesna težina i vrsta ekipe su padajući meniji. Rukom se upisuju samo klub, grad,
-trener i imena, jer njih nema u pravilniku.
+=== Why XlsxWriter, not openpyxl ========================================
 
-**Uzrast se ne unosi nego računa.** Grupa i uzrast su formule iz godišta, a
-meni sa disciplinama je zavisan — u njemu stoje samo discipline koje ta
-uzrasna grupa sme. Trener ne može da pogreši kategoriju.
+Three editions of this form Excel declared corrupted and, in "repairing"
+them, dropped every validation rule — while LibreOffice opened the same
+file without a word. The causes, in order: an equals sign in formula1, a
+range inside a rule, and a "safety" re-save through LibreOffice that
+adds an operator and a second formula to lists. Hence XlsxWriter, and
+verify() at the end reads the raw XML and stops on any known trap.
 
-**Piše se samo tamo gde je predviđeno.** List je zaključan; otključana su
-jedino polja za unos.
+=== Maintenance =========================================================
 
-── Zašto XlsxWriter, a ne openpyxl ────────────────────────────────────
+The rulebook must live in two places at once — the app and this file's
+menus. To keep them from drifting, the script copies nothing: it reads
+disciplines, groups and weights from assets/js/data.js through Node.
+Birth years are computed per season, so next year's form is one command:
 
-Tri izdanja ovog formulara Excel je proglasio oštećenim i pri „popravci"
-izbacio **sva** pravila za unos — trener bi dobio golu tabelu bez ijednog
-padajućeg menija, dok se u LibreOfficeu isti fajl otvarao bez reči. Uzroci su
-bili redom: znak jednakosti u `formula1`, opseg unutar pravila, i (moj
-„sigurnosni") prepis kroz LibreOffice, koji spiskovima dopiše `operator` i
-drugu formulu.
+    python3 form/build-entry-form.py          # current season
+    python3 form/build-entry-form.py 2027     # next one
 
-Zato fajl više ne piše openpyxl nego **XlsxWriter** — biblioteka koja radi
-jedno jedino: piše .xlsx onako kako ga Excel očekuje. Nema prepisa kroz drugi
-program, a `verify()` na kraju čita sirov XML i staje ako nađe bilo šta sa
-spiska poznatih zamki.
-
-── Održavanje ─────────────────────────────────────────────────────────
-
-Pravilnik mora da bude na dva mesta odjednom — u aplikaciji i u menijima ovog
-fajla. Da se ta dva ne raziđu, skripta **ne prepisuje** discipline, uzrasne
-grupe ni telesne težine: čita ih iz `assets/js/data.js` preko Node-a. Broj kolona za
-discipline se takođe **računa** — toliko koliko ih najbrojnija uzrasna grupa
-sme, ni jedna manje.
-
-**Godišta se ne kucaju.** Uzrasna tabela saveza se svake sezone pomeri za
-jednu godinu, pa se u `data.js` drži uzrast, a godišta se računaju za traženu
-sezonu. Formular za sledeću godinu je jedna komanda:
-
-    python3 form/build-entry-form.py          # tekuća sezona
-    python3 form/build-entry-form.py 2027     # sledeća
-
-Traži: python3 + XlsxWriter (`pip install xlsxwriter`) i node.
+Needs: python3 + XlsxWriter (pip install xlsxwriter) and node.
 """
 
 import datetime
@@ -65,17 +49,14 @@ OUTPUT = Path(__file__).resolve().parent / 'FSS-Entry-Form.xlsx'
 
 ROWS = 120          # koliko praznih redova formular nudi
 
-# ── Pravilnik iz aplikacije ────────────────────────────────────────────
+# === The rulebook from the app =============================================
 
 
 def rulebook(season):
     """
-    Čita pravilnik iz data.js — za **zadatu takmičarsku sezonu**.
-
-    Uzrasne grupe se tamo drže kao raspon uzrasta, pa godišta izlaze
-    izračunata: 2026. su poletarci 2019. i mlađi, 2027. su 2020. i mlađi.
-    Formular za sledeću godinu se time pravi jednom komandom, bez ijedne
-    ručno prekucane godine.
+    Reads the rulebook from data.js for the given season. Age groups are
+    stored as age ranges, so birth years come out computed — next year's
+    form takes one command and no retyped years.
     """
     kod = (
         "import('./assets/js/data.js').then(m => console.log(JSON.stringify({"
@@ -96,13 +77,13 @@ def rulebook(season):
 
 
 def discipline_columns(p):
-    """Koliko disciplina sme najbrojnija uzrasna grupa — toliko i kolona."""
+    """As many discipline columns as the biggest age group may enter."""
     return max(len([d for d in p['pojedinacne'] if a['code'] in d['groups']])
                for a in p['AGES'])
 
 
 def team_slots(p):
-    """Najveća ekipa po pravilniku — toliko mesta za članove."""
+    """The largest team in the rulebook — that many member slots."""
     return max(d['team']['max'] for d in p['ekipne'])
 
 
@@ -116,9 +97,9 @@ def column_letter(i):
     return ime
 
 
-# ── Provere u formulama ────────────────────────────────────────────────
+# === Formula checks =============================================
 
-# Šta sme da stoji u imenu: naša latinična slova, razmak, crtica, apostrof.
+# What a name may contain: our Latin letters, space, hyphen, apostrophe.
 ALLOWED_CHARS = ("ABCDEFGHIJKLMNOPQRSTUVWXYZ"
               "abcdefghijklmnopqrstuvwxyz"
               "ČĆĐŠŽčćđšž -'")
@@ -127,14 +108,10 @@ NAME_LENGTH = 60
 
 def letters_only(cell):
     """
-    Tačno kad u ćeliji nema ničega osim slova, razmaka, crtice i apostrofa.
-
-    Ime se **dopunjava** slovima do fiksne dužine pre provere. Bez toga bi
-    ostatak reda bio prazan tekst, a `FIND("")` se ne ponaša isto u Excelu
-    (vrati 1) i u LibreOfficeu (greška) — pa bi ista provera u dva programa
-    davala različit odgovor.
-
-    Ovo ide **samo u kolonu „Provera"**. U pravilu za unos niz nije dozvoljen.
+    True when the cell holds nothing but letters, spaces, hyphens and
+    apostrophes. The name is padded to a fixed length first, because
+    FIND("") behaves differently in Excel and LibreOffice. Goes only in
+    the "Provera" column — arrays are not allowed in validation rules.
     """
     return (f'SUMPRODUCT(--ISERROR(FIND(MID({cell}&REPT("a",{NAME_LENGTH}),'
             f'ROW($A$1:$A${NAME_LENGTH}),1),"{ALLOWED_CHARS}")))=0')
@@ -142,13 +119,10 @@ def letters_only(cell):
 
 def no_digits(cell):
     """
-    Provera koja sme da stoji u pravilu za unos: nijedna cifra.
-
-    Excel u pravilu za unos ne prima ni opseg ni niz („You may not use
-    reference operators or array constants for Data Validation criteria"), a
-    formula sme da bude dugačka najviše 255 znakova. Zato ovde stoji deset
-    odvojenih `FIND`-ova nad jednom ćelijom. Znakovi (`@`, `.`, `_`) ostaju na
-    kolonu „Provera" i na uvoz u aplikaciju.
+    A check that may live in a validation rule: no digits. Excel accepts
+    neither ranges nor arrays there and caps formulas at 255 characters,
+    so this is ten separate FINDs over one cell. Other characters are
+    left to the "Provera" column and the app's import.
     """
     checks = ','.join(f'ISERROR(FIND("{d}",{cell}))' for d in range(10))
     return f'AND({checks})'
@@ -162,10 +136,10 @@ def age_name_formula(group):
     return f'IF({group}="","",VLOOKUP({group},INDEX(grupe,0,2):INDEX(grupe,0,3),2,FALSE))'
 
 
-# ── Izgled ─────────────────────────────────────────────────────────────
+# === Styles =============================================
 
 def styles(wb):
-    """Sve što se koristi na oba lista, na jednom mestu."""
+    """Everything both sheets use, in one place."""
     return {
         'naslov': wb.add_format({'bold': True, 'font_size': 14, 'font_name': 'Calibri'}),
         'sitno': wb.add_format({'italic': True, 'font_size': 9, 'font_color': '#6B6B70',
@@ -177,7 +151,7 @@ def styles(wb):
             'bold': True, 'font_size': 9, 'font_color': 'white', 'bg_color': '#5980A6',
             'border': 1, 'border_color': '#D4D4D7', 'align': 'center', 'valign': 'vcenter',
             'text_wrap': True, 'font_name': 'Calibri'}),
-        # Otključano je samo ono u šta se piše.
+        # Only the fields written into are unlocked.
         'unos': wb.add_format({'locked': False, 'border': 1, 'border_color': '#D4D4D7',
                                'font_size': 10, 'font_name': 'Calibri'}),
         'izvedeno': wb.add_format({'border': 1, 'border_color': '#D4D4D7', 'bg_color': '#EEF6FF',
@@ -189,10 +163,9 @@ def styles(wb):
 
 def lock_sheet(ws, header_row):
     """
-    Zaključava list i pušta samo ono što ima smisla dirati.
-
-    Bez lozinke — ovo nije brava nego ograda: sprečava da se tekst nađe tamo
-    gde ga niko neće tražiti, a savez i dalje može da otvori list.
+    Locks the sheet, leaving only what makes sense to touch. No password
+    — a fence, not a lock: it keeps text out of cells nobody will look
+    in, and the federation can still open the sheet.
     """
     ws.protect('', {'format_columns': True, 'format_rows': True,
                     'select_locked_cells': True, 'select_unlocked_cells': True})
@@ -201,21 +174,21 @@ def lock_sheet(ws, header_row):
     ws.repeat_rows(header_row)
 
 
-# ── Skriveni list sa pravilnikom ───────────────────────────────────────
+# === Hidden rulebook sheet =============================================
 
 def write_rulebook(wb, p):
-    """Spiskovi od kojih žive padajući meniji, kao imenovani opsezi."""
+    """The lists the dropdown menus live on, as named ranges."""
     ws = wb.add_worksheet('Pravilnik')
     ws.hide()
 
-    # Uzrasne grupe: donja granica godišta → šifra i naziv. LOOKUP traži
-    # rastuće granice, pa idu od najstarijih ka najmlađima.
+    # Age groups: lower year bound → code and name. LOOKUP wants
+    # ascending bounds, so they go oldest to youngest.
     ws.write_row(0, 0, ['od godišta', 'grupa', 'uzrast'])
     for i, age in enumerate(sorted(p['AGES'], key=lambda a: a['od']), start=1):
         ws.write_row(i, 0, [age['od'], age['code'], age['name'].lower()])
     wb.define_name('grupe', f"=Pravilnik!$A$2:$C${len(p['AGES']) + 1}")
 
-    kolona = [4]  # od E nadalje
+    kolona = [4]  # from column E on
 
     def spisak(ime, vrednosti):
         c = kolona[0]
@@ -231,9 +204,8 @@ def write_rulebook(wb, p):
     spisak('pojasevi', p['BELTS'])
     spisak('polovi', ['muški', 'ženski'])
 
-    # Rezervni spiskovi: dok godište nije izabrano, meni mora da ponudi
-    # **nešto**. Prazan izvor liste Excel prijavljuje kao grešku, pa bi trener
-    # pomislio da je fajl pokvaren.
+    # Fallback lists: until a year is picked the menu must offer
+    # something — Excel reports an empty list source as an error.
     spisak('sve_discipline', [d['name'] for d in p['pojedinacne']])
     spisak('sve_ekipne', [d['name'] for d in p['ekipne']])
     sve_kilaze = []
@@ -251,7 +223,7 @@ def write_rulebook(wb, p):
         for sex, kljuc in (('M', 'M'), ('Ž', 'Z')):
             spisak(f'kg_{code}_{kljuc}', p['WEIGHTS'][code][sex])
 
-    # Sastav ekipe po disciplini — za proveru broja članova.
+    # Team size per discipline — for the member-count check.
     c = kolona[0]
     ws.write_row(0, c, ['ekipa', 'min', 'max'])
     for i, d in enumerate(p['ekipne'], start=1):
@@ -260,7 +232,7 @@ def write_rulebook(wb, p):
                    f'=Pravilnik!${column_letter(c)}$2:${column_letter(c + 2)}${len(p["ekipne"]) + 1}')
     kolona[0] += 3
 
-    # Vrste ekipe: enbu ima muški i mešoviti par, ostale su jednog pola.
+    # Team variants: enbu has men's and mixed pairs, the rest one sex.
     vrste = ['muškarci', 'žene']
     for d in p['ekipne']:
         for v in (d['variants'] or []):
@@ -272,7 +244,7 @@ def write_rulebook(wb, p):
     return ws
 
 
-# ── List: pojedinačne prijave ──────────────────────────────────────────
+# === Sheet: individual entries =============================================
 
 def sheet_individual(wb, p, s):
     ws = wb.add_worksheet('Prijava')
@@ -294,8 +266,8 @@ def sheet_individual(wb, p, s):
     ws.set_column(K_POMOC_D, K_POMOC_K, 14, None, {'hidden': True})
 
     ws.write(0, 0, 'PRIJAVA TAKMIČARA', s['naslov'])
-    # Izdanje na vidnom mestu: po njemu se nov fajl razlikuje od starog koji
-    # je ostao u pošti ili u Downloads-u.
+    # The edition in plain sight — it tells a fresh file from an old one
+    # left in the mail or in Downloads.
     ws.write(1, 0, 'Fudokan savez Srbije · popunjava klub i dostavlja savezu · '
                    f'takmičarska sezona {p["sezona"]}. · '
                    f'izdanje {datetime.date.today().strftime("%d.%m.%Y.")}', s['sitno'])
@@ -317,7 +289,7 @@ def sheet_individual(wb, p, s):
         if napomena:
             ws.write(red, 3, napomena, s['sitno'])
 
-    ZAGLAVLJE = 9                      # Excel red 10
+    ZAGLAVLJE = 9                      # Excel row 10
     ws.set_row(ZAGLAVLJE, 30)
     for i, (naslov, _) in enumerate(kolone):
         ws.write(ZAGLAVLJE, i, naslov, s['zaglavlje'])
@@ -327,7 +299,7 @@ def sheet_individual(wb, p, s):
     kg, pomoc_d, pomoc_k = column_letter(K_KILAZA), column_letter(K_POMOC_D), column_letter(K_POMOC_K)
 
     for r in range(prvi, posl + 1):
-        e = r + 1                      # broj reda kako ga vidi Excel
+        e = r + 1                      # the row number as Excel sees it
         for c in [K_GOD, K_IME, K_POL, K_POJAS] + list(range(K_DISC, K_KILAZA + 1)):
             ws.write_blank(r, c, None, s['unos'])
 
@@ -344,8 +316,8 @@ def sheet_individual(wb, p, s):
             f'IF($C{e}="","Nedostaje pol",'
             f'IF($D{e}="","Nedostaje pojas",'
             f'IF(COUNTA({disc})=0,"Nije izabrana nijedna disciplina",'
-            # Disciplina van uzrasta: meni je ne nudi, ali ume da uđe
-            # prekucavanjem ili pre nego što je godište izabrano.
+            # A discipline outside the age: the menu does not offer it,
+            # but it can arrive typed or before the year was picked.
             f'IF(SUMPRODUCT(--({disc}<>""),--(COUNTIF(INDIRECT("disc_"&$E{e}),{disc})=0))>0,'
             f'"Izabrana disciplina nije moguća za uzrast "&$E{e},'
             f'IF(AND(COUNTIF({disc},"Fudokan sport kumite")>0,{kg}{e}=""),'
@@ -354,14 +326,14 @@ def sheet_individual(wb, p, s):
             f'"Telesna težina se unosi isključivo uz Fudokan sport kumite",'
             f'"prijava je kompletna")))))))))))'), s['provera'], '')
 
-        # Ime opsega iz kog se puni meni. Cela računica sedi ovde, u ćeliji,
-        # da bi samo pravilo za unos ostalo najprostije moguće.
+        # The named range the menu fills from. The whole calculation
+        # sits here in a cell, so the validation rule stays simplest.
         ws.write_formula(r, K_POMOC_D, f'=IF($E{e}="","sve_discipline","disc_"&$E{e})', None, '')
         ws.write_formula(r, K_POMOC_K, (
             f'=IF(OR($E{e}="",$C{e}=""),"sve_kilaze",'
             f'"kg_"&$E{e}&"_"&IF($C{e}="ženski","Z","M"))'), None, '')
 
-    pe = prvi + 1                      # prvi red podataka po Excelu
+    pe = prvi + 1                      # first data row in Excel terms
     meni = {'validate': 'list', 'ignore_blank': True, 'dropdown': True, 'error_type': 'stop'}
     ws.data_validation(prvi, K_GOD, posl, K_GOD, dict(
         meni, source='=godista', error_title='Godište',
@@ -392,7 +364,7 @@ def sheet_individual(wb, p, s):
     return ws
 
 
-# ── List: ekipne prijave ───────────────────────────────────────────────
+# === Sheet: team entries =============================================
 
 def sheet_teams(wb, p, s):
     ws = wb.add_worksheet('Ekipno')
@@ -422,13 +394,13 @@ def sheet_teams(wb, p, s):
         'odnosu na taj uzrast. Svi članovi ekipe moraju pripadati istoj uzrasnoj grupi.'),
         s['uputstvo'])
 
-    # Klub i trener se ne pitaju drugi put — stoje sa prvog lista.
+    # Club and coach are not asked twice — pulled from the first sheet.
     for red, ime, izvor in ((3, 'Klub', 'B4'), (4, 'Grad', 'B5'), (5, 'Trener', 'B6')):
         ws.write(red, 0, ime, s['polje'])
         ws.write_formula(red, 1, f'=Prijava!{izvor}', s['izvedeno'], '')
     ws.write(3, 3, 'preuzima se sa lista „Prijava"', s['sitno'])
 
-    ZAGLAVLJE = 8                      # Excel red 9
+    ZAGLAVLJE = 8                      # Excel row 9
     ws.set_row(ZAGLAVLJE, 30)
     for i, (naslov, _) in enumerate(kolone):
         ws.write(ZAGLAVLJE, i, naslov, s['zaglavlje'])
@@ -444,8 +416,8 @@ def sheet_teams(wb, p, s):
         for c in [K_DISC, K_VRSTA] + list(range(K_CLAN, K_PROVERA)):
             ws.write_blank(r, c, None, s['unos'])
 
-        # Grupa ekipe je grupa prvog člana; provera javlja ako se članovi
-        # razilaze po uzrastu.
+        # The team's group is the first member's; the check reports
+        # members from different groups.
         ws.write_formula(r, K_GRUPA, f'={group_formula(f"${godista[0]}{e}")}', s['izvedeno'], '')
         ws.write_formula(r, K_UZRAST, f'={age_name_formula(f"$C{e}")}', s['izvedeno'], '')
 
@@ -505,18 +477,15 @@ def sheet_teams(wb, p, s):
     return ws
 
 
-# ── Provera gotovog fajla ──────────────────────────────────────────────
+# === Verifying the finished file =============================================
 
 def verify(path):
     """
-    Poslednja provera pre isporuke — nad sirovim XML-om, ne nad izgledom.
-
-    Excel fajl sa jednim jedinim spornim pravilom za unos proglasi oštećenim i
-    pri „popravci" izbaci **ceo** blok pravila: trener onda dobije golu tabelu
-    bez ijednog padajućeg menija, dok tabela, formule i zaključavanje ostanu —
-    pa na prvi pogled izgleda kao da posao nije ni urađen.
-
-    Svaka stavka na ovom spisku plaćena je jednim izdanjem formulara.
+    The last check before delivery — over the raw XML, not the looks.
+    One bad validation rule and Excel declares the file corrupted,
+    dropping the whole rules block in "repair" — the coach then gets a
+    bare table with no menus. Every item on this list cost one edition
+    of the form.
     """
     greske = []
     with zipfile.ZipFile(path) as z:
@@ -559,8 +528,8 @@ def verify(path):
 
 
 def main():
-    # Sezona je godina takmičenja; podrazumeva se tekuća, a za sledeću se
-    # zada: `python3 form/build-entry-form.py 2027`.
+    # The season is the competition year; defaults to the current one,
+    # next year's is passed: python3 form/build-entry-form.py 2027.
     season = int(sys.argv[1]) if len(sys.argv) > 1 else datetime.date.today().year
     p = rulebook(season)
     p['sezona'] = season

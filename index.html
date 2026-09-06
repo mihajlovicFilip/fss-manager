@@ -5,19 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kontrolna tabla · Fudokan savez Srbije</title>
 <meta name="theme-color" content="#5980a6">
-<!-- Ime keša koje ova strana očekuje; mora u korak sa CACHE u sw.js. -->
-<meta name="app-cache" content="fss-manager-v64">
+<!-- Cache name this page expects; must match CACHE in sw.js. -->
+<meta name="app-cache" content="fss-manager-v65">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="assets/icons/favicon-64.png" sizes="64x64" type="image/png">
 <link rel="icon" href="assets/icons/icon-192.png" sizes="192x192" type="image/png">
 <link rel="apple-touch-icon" href="assets/icons/icon-192.png">
 
-<!-- Ništa na ovoj strani ne dodiruje mrežu: fontovi se služe iz assets/fonts,
-     a service worker keširа ostalo. -->
+<!-- Nothing on this page touches the network: fonts are local and the
+     service worker caches the rest. -->
 <link rel="stylesheet" href="assets/css/fonts.css">
 <link rel="stylesheet" href="assets/css/industry.css">
 <link rel="stylesheet" href="assets/css/app.css">
-<!-- Papir za dugme „Štampaj" — isti list koji izlazi i iz documents.html. -->
+<!-- Paper for the Štampaj button — the same sheet documents.html prints. -->
 <link rel="stylesheet" href="assets/css/doc-sheet.css">
 </head>
 <body>
@@ -26,26 +26,23 @@
 <div id="modal"></div>
 <div id="toast" class="toast" role="status" hidden></div>
 
-<!-- Klasična skripta, pa se <doc-page> registruje pre nego što modul krene. -->
+<!-- Classic script, so <doc-page> registers before the module starts. -->
 <script src="assets/js/doc-page.js"></script>
 <script type="module" src="assets/js/app.js"></script>
 
 <script>
-  // Registruje offline keš. Traži siguran kontekst, pa ništa ne radi kad se
-  // folder otvori direktno iz Findera preko file:// — koristi start.command.
+  // Registers the offline cache. Needs a secure context, so it does
+  // nothing over file:// — use start.command.
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      // updateViaCache: 'none' — sam sw.js se nikad ne uzima iz HTTP keša,
-      // inače osvežen folder ume da danima služi staru verziju. update()
-      // pri svakom otvaranju natera proveru odmah, a ne kad pregledaču
-      // padne na pamet.
-      // Prvo provera: da li keš koji stoji u pregledaču pripada ovoj verziji.
+      // updateViaCache: 'none' — sw.js itself is never taken from the HTTP
+      // cache, or a refreshed folder can keep serving an old build for days.
+      // update() forces the check on every open.
       //
-      // Sama strana uvek stiže sveža sa servera, pa je ono što u njoj piše
-      // merodavno. Ako u keš skladištu nema kešа sa tim imenom, znači da tu
-      // stoji nešto starije — i to se briše zajedno sa service worker-om, pa
-      // se strana jednom osveži. Bez ovoga stara verzija ume da se drži
-      // danima, a sa strane se to vidi samo po oznaci verzije u dnu.
+      // First check that the stored cache belongs to this version. The page
+      // itself always arrives fresh from the server, so its meta tag is the
+      // truth: a cache under any other name is an older build, so it is
+      // deleted together with the worker and the page reloads once.
       const wantedCache = document.querySelector('meta[name="app-cache"]')?.content;
       if (wantedCache && window.caches) {
         caches.keys().then(async (keys) => {
@@ -55,7 +52,7 @@
           const regs = await navigator.serviceWorker.getRegistrations();
           await Promise.all(regs.map((r) => r.unregister()));
           location.reload();
-        }).catch(() => { /* bez keša nema ni šta da se čisti */ });
+        }).catch(() => { /* no cache, nothing to clean up */ });
       }
 
       navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
@@ -64,10 +61,8 @@
           console.warn('Offline keš nije registrovan:', err.message);
         });
 
-      // Kad nova verzija preuzme, strana se **jednom** osveži. Bez ovoga
-      // pregledač do sledećeg otvaranja i dalje prikazuje staru aplikaciju,
-      // iako je nova već instalirana — a to se sa strane vidi samo po oznaci
-      // verzije u dnu navigacije.
+      // When a new version takes over, the page reloads once — otherwise
+      // the old build stays on screen until the next visit.
       let reloaded = false;
       navigator.serviceWorker.addEventListener('controllerchange', () => {
         if (reloaded) return;

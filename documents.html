@@ -45,10 +45,9 @@
   // still runs, it just is not cached. Use start.command instead.
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      // updateViaCache: 'none' — sam sw.js se nikad ne uzima iz HTTP keša,
-      // inače osvežen folder ume da danima služi staru verziju. update()
-      // pri svakom otvaranju natera proveru odmah, a ne kad pregledaču
-      // padne na pamet.
+      // updateViaCache: 'none' — sw.js itself is never taken from the HTTP
+      // cache, or a refreshed folder can keep serving an old build.
+      // update() forces the check on every open.
       navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
         .then((reg) => reg.update())
         .catch((err) => {

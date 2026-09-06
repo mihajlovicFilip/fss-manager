@@ -1,23 +1,14 @@
 #!/usr/bin/env python3
 """
-Lokalni server za FSS Manager.
+Local server for FSS Manager.
 
-Postoji zbog jednog jedinog razloga: **pregledač ne sme da služi jučerašnju
-verziju iz sopstvenog keša.**
+It exists for one reason: the browser must never serve yesterday's build
+from its own HTTP cache. Every response says no-store, and conditional
+headers are stripped from requests, so there is no "304 Not Modified"
+based on dates the browser remembered from an older version.
 
-`python3 -m http.server` uz svaki fajl šalje njegov datum, ali nijedno uputstvo
-o kešu. Pregledač tada sam procenjuje koliko dugo sme da ga drži — i ume da
-mesecima služi zapamćenu kopiju, a da server o tome ne sazna ništa. To se u
-praksi videlo ovako: aplikacija na disku je bila nova, u dnu navigacije je i
-dalje stajala stara oznaka verzije, a u dnevniku servera nije bilo nijednog
-zahteva za `app.js` — jer ga pregledač nije ni tražio.
-
-Ovaj server zato uz svaki odgovor kaže **no-store**: ništa se ne pamti između
-otvaranja. Uz to briše uslovna zaglavlja iz zahteva, pa nema ni odgovora „304,
-nema ništa novo" na osnovu datuma koji pregledač pamti od ranije.
-
-Offline rad time nije ugrožen — o njemu se stara service worker, koji svoj keš
-puni sam i koristi ga kad server ne odgovara.
+Offline use is not affected — the service worker keeps its own cache and
+uses it when the server is not running.
 
     python3 server.py [port] [folder]
 """
@@ -29,8 +20,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 class Handler(SimpleHTTPRequestHandler):
     def send_head(self):
-        # Bez uslovnih zaglavlja nema ni „304 Not Modified" na osnovu datuma
-        # koji je pregledač zapamtio pre nekoliko verzija.
+        # Without conditional headers there is no "304 Not Modified".
         del self.headers['If-Modified-Since']
         del self.headers['If-None-Match']
         return super().send_head()
@@ -40,7 +30,7 @@ class Handler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def log_message(self, fmt, *args):
-        # Isti oblik kao kod ugrađenog servera — dnevnik ostaje čitljiv.
+        # Same format as the built-in server, so the log stays familiar.
         sys.stderr.write('%s - - [%s] %s\n'
                          % (self.address_string(), self.log_date_time_string(), fmt % args))
 

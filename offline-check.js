@@ -1,30 +1,26 @@
 #!/usr/bin/env node
 /**
- * offline-check.js — stalna provera cele aplikacije, bez ijedne zavisnosti.
+ * offline-check.js — the standing check of the whole app, dependency-free.
  *
- *     node offline-check.js          # cela provera
- *     node offline-check.js --keep   # zadrži radni folder sa PDF-ovima
+ *     node offline-check.js          # the whole check
+ *     node offline-check.js --keep   # keep the working folder with PDFs
  *
- * Šta se proverava, redom:
+ * What it checks, in order:
  *
- *   1. **Uvoz iz pravog formulara.** Fikstura se ne crta iz glave: uzima se
- *      isti `form/FSS-Entry-Form.xlsx` koji se šalje klubovima i u njega se
- *      upišu takmičari — čime se usput proverava i da su listovi i naslovi
- *      kolona tamo gde ih čitač očekuje. Godišta se **računaju** iz uzrasne
- *      tabele za tekuću sezonu, ne kucaju — inače bi fikstura za koju godinu
- *      sama iskliznula u drugu uzrasnu grupu i pala bez razloga.
- *   2. **Svaki ekran se otvara** u headless Chrome-u, bez ijedne greške u
- *      konzoli i bez ijednog zahteva koji bi otišao van lokalnog servera.
- *   3. **Brojke se slažu**: ono što kontrolna tabla prikazuje mora biti
- *      jednako onome što je u bazi, a ono što je u bazi jednako fiksturi.
- *   4. **Dvostruki uvoz ne pravi duplikate** — isti fajl se uveze još jednom
- *      i ništa ne sme da se promeni.
- *   5. **Dokumenti se štampaju u PDF**, svaki tip, i nijedan list ne sme da
- *      bude isečen (sadržaj ne prelazi ivice lista).
+ *   1. Import from the real form. The fixture is written into the same
+ *      form/FSS-Entry-Form.xlsx the clubs receive — which also verifies
+ *      the sheets and headers are where the reader expects. Birth years
+ *      are computed from the age table for the current season, so the
+ *      fixture cannot drift into another group over time.
+ *   2. Every screen opens in headless Chrome with no console error and
+ *      no request leaving the local server.
+ *   3. The numbers agree: dashboard equals database equals fixture.
+ *   4. Importing the same file twice changes nothing.
+ *   5. Every document type prints to PDF with nothing clipped.
  *
- * Traži: Node 22+ (ugrađeni WebSocket za CDP), python3 (server) i Google
- * Chrome ili Chromium. Ništa se ne instalira: zip se čita i piše kroz
- * `zlib`, a Chrome se vozi sirovim DevTools protokolom.
+ * Needs Node 22+ (built-in WebSocket for CDP), python3 and Chrome.
+ * Nothing is installed: the zip goes through zlib, Chrome is driven
+ * over the raw DevTools protocol.
  */
 
 import { spawn } from 'node:child_process';
@@ -42,18 +38,18 @@ const KEEP = process.argv.includes('--keep');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-/** Bodovi jednog plasmana — iz pravilnika, da provera ne nosi svoju skalu. */
+/** Points for one placement — from the rulebook, not a private scale. */
 const placementValue = (d, key) => d.PLACEMENTS.find((p) => p.key === key)?.points || 0;
 
 let passed = 0;
 const pass = (msg) => { passed += 1; console.log(`  ✓ ${msg}`); };
 const fail = (msg) => { throw new Error(msg); };
 
-// ── Zip: čitanje i pisanje kroz zlib ───────────────────────────────────
+// === Zip: reading and writing through zlib =============================================
 //
-// Isti posao koji u aplikaciji radi assets/js/xlsx.js, samo u Node-u i u oba
-// smera: fajlovi koji se ne menjaju prepišu se komprimovani kakvi jesu, a
-// izmenjeni list se ponovo deflate-uje. Excel-u je svejedno, čitaču takođe.
+// The same job assets/js/xlsx.js does in the app, in Node and in both
+// directions: unchanged files are copied compressed as they are, the
+// modified sheet is deflated again.
 
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
@@ -141,11 +137,11 @@ function writeZip(entries) {
   return Buffer.concat([...chunks, dir, end]);
 }
 
-// ── Upis ćelija u list formulara ───────────────────────────────────────
+// === Writing cells into the form sheet =============================================
 //
-// Redovi formulara već postoje (nose formule i okvire), pa se nove ćelije
-// **umeću među zatečene**, po redosledu kolona — Excel i čitač očekuju
-// ćelije reda poređane sleva nadesno.
+// The form's rows already exist (formulas and borders), so new cells are
+// inserted among them in column order — Excel and the reader expect a
+// row's cells left to right.
 
 const colLetter = (i) => {
   let s = '';
@@ -180,9 +176,9 @@ function withCells(xml, rowNum, newCells) {
   const cells = (inner.match(/<c [^>]*?\/>|<c [^>]*?>[\s\S]*?<\/c>/g) || [])
     .map((c) => ({ col: colIndex(/r="([A-Z]+)\d+"/.exec(c)[1]), xml: c }));
   for (const c of newCells) {
-    // Polja za unos u formularu postoje kao prazne ćelije sa stilom (okvir,
-    // otključanost) — takva se zamenjuje, a stil joj se zadržava. Ćelija sa
-    // sadržajem se ne gazi: to bi značilo da se raspored formulara promenio.
+    // Input fields exist as empty styled cells (border, unlocked) —
+    // those are replaced, keeping the style. A cell with content is not
+    // overwritten: that would mean the form's layout changed.
     const at = cells.findIndex((x) => x.col === c.col);
     if (at >= 0) {
       const old = cells[at].xml;
@@ -197,13 +193,13 @@ function withCells(xml, rowNum, newCells) {
   return xml.replace(m[0], `<row r="${rowNum}"${m[1]}>${cells.map((c) => c.xml).join('')}</row>`);
 }
 
-// ── Fikstura iz pravilnika ─────────────────────────────────────────────
+// === Fixture from the rulebook =============================================
 
 const CLUB = { name: 'KK Provera', city: 'Proverovac', coach: 'Trener Proverić' };
 const SURNAMES = ['Petrović', 'Jovanović', 'Nikolić', 'Marković', 'Đorđević', 'Stojanović',
   'Ilić', 'Pavlović', 'Simić', 'Kostić', 'Popović', 'Todorović', 'Ristić', 'Stanković'];
 
-/** Godište koje u datoj sezoni sigurno pada u traženu grupu — računato, ne kucano. */
+/** A birth year that surely falls in the group this season — computed. */
 function yearInGroup(d, age, season) {
   for (let a = age.from; a <= age.to; a++) {
     const year = season - a;
@@ -213,8 +209,8 @@ function yearInGroup(d, age, season) {
 }
 
 /**
- * Sastavlja prijavu: po jedan takmičar iz svake uzrasne grupe (do dve
- * discipline, telesna težina samo gde je žreb po njoj deli) i jedna ekipa.
+ * Builds the fixture: one competitor per age group (up to two
+ * disciplines, weight only where the draw splits by it) and one team.
  */
 function buildFixture(d, season, competitionName) {
   const people = [];
@@ -244,8 +240,8 @@ function buildFixture(d, season, competitionName) {
   });
   if (!people.length) fail('Iz pravilnika se ne da sastaviti nijedan takmičar — provera ne može dalje.');
 
-  // Ekipa: disciplina bez varijanti ako postoji, inače prva varijanta prve
-  // ekipne discipline. Članovi su iz iste grupe, imena van pojedinačnog spiska.
+  // The team: a variant-free discipline if one exists, else the first
+  // variant. Members share a group; names differ from the individuals.
   let team = null;
   const teamDisc = d.DISCIPLINES.find((x) => x.team && !x.variants)
     || d.DISCIPLINES.find((x) => x.team);
@@ -273,7 +269,7 @@ function buildFixture(d, season, competitionName) {
   };
 }
 
-/** Upisuje fiksturu u kopiju pravog formulara i vraća putanju do fajla. */
+/** Writes the fixture into a copy of the real form. */
 function fillForm(fixture, outPath) {
   const entries = readZip(fs.readFileSync(path.join(ROOT, 'form', 'FSS-Entry-Form.xlsx')));
   const byName = new Map(entries.map((e) => [e.name, e]));
@@ -290,7 +286,7 @@ function fillForm(fixture, outPath) {
     return `xl/${rel[1].replace(/^\/?xl\//, '')}`;
   };
 
-  // List „Prijava": zaglavlje (B4–B7) pa po red za svakog takmičara od reda 11.
+  // The "Prijava" sheet: header (B4–B7), then a row per competitor from row 11.
   const soloPath = target('Prijava');
   let solo = inflate(byName.get(soloPath)).toString();
   solo = withCells(solo, 4, [strCell('B4', CLUB.name)]);
@@ -310,8 +306,8 @@ function fillForm(fixture, outPath) {
     solo = withCells(solo, r, cells);
   });
 
-  // List „Ekipno": jedan red od reda 10 — disciplina, vrsta, članovi u
-  // trojkama godište · ime · pol počev od kolone E.
+  // The "Ekipno" sheet: one row from row 10 — discipline, variant, and
+  // members in year·name·sex triples from column E.
   const teamPath = target('Ekipno');
   let teamXml = inflate(byName.get(teamPath)).toString();
   if (fixture.team) {
@@ -339,7 +335,7 @@ function fillForm(fixture, outPath) {
   fs.writeFileSync(outPath, writeZip(out));
 }
 
-// ── Server i Chrome ────────────────────────────────────────────────────
+// === Server and Chrome =============================================
 
 function startServer() {
   const proc = spawn('python3', ['server.py', String(PORT)], { cwd: ROOT, stdio: 'ignore' });
@@ -352,7 +348,7 @@ async function waitServer() {
     try {
       const r = await fetch(`${ORIGIN}/index.html`);
       if (r.ok) return;
-    } catch { /* server se još podiže */ }
+    } catch { /* server still starting */ }
     await sleep(200);
   }
   fail(`Server se nije javio na ${ORIGIN} — da li je port ${PORT} zauzet?`);
@@ -377,7 +373,7 @@ async function startChrome(profileDir) {
     `--user-data-dir=${profileDir}`, '--remote-debugging-port=0', 'about:blank',
   ], { stdio: 'ignore' });
 
-  // Chrome sam upiše port u profil — čita se odatle, ne pogađa.
+  // Chrome writes its port into the profile — read, not guessed.
   const portFile = path.join(profileDir, 'DevToolsActivePort');
   for (let i = 0; i < 100; i++) {
     if (fs.existsSync(portFile)) {
@@ -390,7 +386,7 @@ async function startChrome(profileDir) {
   return null;
 }
 
-/** Najmanji mogući CDP klijent preko ugrađenog WebSocket-a. */
+/** The smallest possible CDP client over the built-in WebSocket. */
 function connectCdp(wsUrl) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(wsUrl);
@@ -420,12 +416,12 @@ function connectCdp(wsUrl) {
   });
 }
 
-// ── Provera ────────────────────────────────────────────────────────────
+// === The check =============================================
 
 async function main() {
   console.log('offline-check · FSS Manager\n');
 
-  // Pravilnik se čita iz istog data.js koji koristi i aplikacija.
+  // The rulebook comes from the same data.js the app uses.
   const d = await import(pathToFileURL(path.join(ROOT, 'assets', 'js', 'data.js')).href);
   const season = d.SEASON();
   const competitionName = 'Provera aplikacije';
@@ -457,7 +453,7 @@ async function main() {
     await cdp.send('Network.enable');
     await cdp.send('DOM.enable');
 
-    // Ništa ne sme da ode van lokalnog servera — ni font, ni analitika, ništa.
+    // Nothing may leave the local server — no font, no analytics, nothing.
     cdp.on('Network.requestWillBeSent', (p) => {
       const url = p.request.url;
       if (!url.startsWith(ORIGIN) && /^https?:/.test(url)) badRequests.push(url);
@@ -496,7 +492,7 @@ async function main() {
       await until('učitavanje strane', 'document.readyState === "complete"');
     };
 
-    // ── Prvo otvaranje ─────────────────────────────────────────────────
+    // === First open =============================================
     await goto(`${ORIGIN}/index.html`);
     await until('prvo iscrtavanje', 'document.getElementById("app")?.innerHTML.length > 300', 30_000);
     const version = await js('document.querySelector(".side-version")?.textContent');
@@ -505,7 +501,7 @@ async function main() {
     }
     pass(`aplikacija se otvara, verzija ${version}`);
 
-    // ── Takmičenje za proveru ──────────────────────────────────────────
+    // === The test competition =============================================
     const compId = await js(`(async () => {
       const { store } = await import('./assets/js/store.js');
       const c = await store.createCompetition({
@@ -520,7 +516,7 @@ async function main() {
     if (!compId) fail('Takmičenje za proveru nije napravljeno.');
     pass('probno takmičenje otvoreno za prijave');
 
-    // ── Svaki ekran ────────────────────────────────────────────────────
+    // === Every screen =============================================
     await goto(`${ORIGIN}/index.html`);
     await until('iscrtavanje', 'document.getElementById("app")?.innerHTML.length > 300');
     const screens = await js(
@@ -536,7 +532,7 @@ async function main() {
     }
     pass(`svih ${screens.length} ekrana se otvara`);
 
-    // ── Uvoz popunjenog formulara ──────────────────────────────────────
+    // === Importing the filled form =============================================
     await js('location.hash = "uvoz"');
     await until('ekran uvoza', '!!document.getElementById("import-target")');
     await js(`(() => {
@@ -578,7 +574,7 @@ async function main() {
     if (fixture.team && first.teams !== 1) fail(`Uvezena ${first.teams} ekipa umesto jedne.`);
     pass(`uvoz iz formulara: ${first.competitors} takmičara, ${first.entries} prijava, ${first.teams} ekipa`);
 
-    // Isti fajl još jednom — ništa ne sme da se promeni.
+    // The same file again — nothing may change.
     await runImport();
     const second = await registry();
     if (JSON.stringify(second) !== JSON.stringify(first)) {
@@ -586,7 +582,7 @@ async function main() {
     }
     pass('isti fajl uvezen dvaput — bez duplikata');
 
-    // ── Brojke na kontrolnoj tabli ─────────────────────────────────────
+    // === Dashboard figures =============================================
     await js('location.hash = "kontrolna-tabla"');
     await until('kontrolna tabla', 'document.querySelectorAll(".stat").length > 3');
     const stats = await js(`Object.fromEntries([...document.querySelectorAll('.stat')]
@@ -601,7 +597,7 @@ async function main() {
     }
     pass('brojke na kontrolnoj tabli jednake bazi');
 
-    // ── Ekipni plasman: bodovi članovima, medalja klubu jednom ─────────
+    // === Team placement: member points, one club medal =============================================
     const teamCheck = await js(`(async () => {
       const { store } = await import('./assets/js/store.js');
       const r = await store.registryFor(${JSON.stringify(compId)});
@@ -638,7 +634,7 @@ async function main() {
     }
     pass(`ekipno zlato: ${teamCheck.members.length} člana po ${gold} bodova, klubu jedna medalja`);
 
-    // Diploma za ekipu postoji i nosi naziv tima, ne imena članova.
+    // The team diploma exists and carries the team name, not members.
     await js('location.hash = "diplome"');
     await until('ekipna diploma', `!!document.querySelector('[data-dip-cat^="team:"]')`);
     const teamDiploma = await js(`document.querySelector('[data-dip-cat^="team:"] .result-disc')?.textContent`);
@@ -648,16 +644,16 @@ async function main() {
     pass(`ekipna diploma nosi naziv tima („${teamDiploma}")`);
 
 
-    // ── Dokumenti u PDF ────────────────────────────────────────────────
+    // === Documents to PDF =============================================
     await goto(`${ORIGIN}/documents.html`);
     await until('vrste dokumenata', 'document.querySelectorAll("#doc-types .toolbar-type").length > 0');
     const types = await js('[...document.querySelectorAll("#doc-types .toolbar-type")].map((b) => b.dataset.type)');
     for (const type of types) {
       await js(`document.querySelector('.toolbar-type[data-type="${type}"]').click()`);
       try {
-        // Dokument se crta kroz requestAnimationFrame, a headless ume da
-        // zadrema i ne isporuči nijedan kadar. Traženje snimka ekrana tera
-        // kompozitor da kadar ipak proizvede, pa zakazano crtanje krene.
+        // The document draws through requestAnimationFrame, and headless
+        // can doze off and deliver no frame. Requesting a screenshot
+        // forces the compositor to produce one, so the render starts.
         const t0 = Date.now();
         for (;;) {
           const ok = await js(`document.querySelectorAll('#doc-sheet section.page').length > 0
@@ -678,7 +674,7 @@ async function main() {
       }
       await sleep(150);
 
-      // Ništa ne sme da viri van lista — širina ni visina.
+      // Nothing may stick out of the sheet — width or height.
       const clipped = await js(`[...document.querySelectorAll('#doc-sheet section.page')]
         .flatMap((p, i) => (p.scrollWidth > p.clientWidth + 1 || p.scrollHeight > p.clientHeight + 1)
           ? ['list ' + (i + 1) + ' (' + p.scrollWidth + '×' + p.scrollHeight + ' u ' + p.clientWidth + '×' + p.clientHeight + ')'] : [])`);
@@ -691,7 +687,7 @@ async function main() {
     }
     pass(`sva ${types.length} dokumenta odštampana u PDF, nijedan list nije isečen`);
 
-    // ── Konzola i mreža ────────────────────────────────────────────────
+    // === Console and network =============================================
     if (consoleErrors.length) fail(`Greške u konzoli:\n  ${consoleErrors.join('\n  ')}`);
     pass('konzola bez ijedne greške');
     if (badRequests.length) fail(`Zahtevi van lokalnog servera:\n  ${[...new Set(badRequests)].join('\n  ')}`);
@@ -703,13 +699,13 @@ async function main() {
     cdp?.close();
     chrome?.proc.kill();
     server.kill();
-    // Chrome pušta profil tek koji trenutak posle gašenja; čišćenje ne sme
-    // da sruši proveru ni da zaseni njenu pravu grešku.
+    // Chrome releases the profile a moment after closing; cleanup must
+    // neither fail the check nor mask its real error.
     if (!KEEP) {
       await sleep(300);
       try {
         fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-      } catch { /* temp folder ionako čisti sistem */ }
+      } catch { /* the system cleans temp anyway */ }
     }
   }
 }

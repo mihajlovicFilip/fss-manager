@@ -1,19 +1,17 @@
-/* ══════════════════════════════════════════════════════════════════════════
-   List — the paper itself.
+/*=============================================================================
 
-   Everything below describes one printed sheet: the letterhead, the title
-   band, the table and the foot. It is shared by the standalone documents
-   page (dokumenti.html) and by the print button on every list inside the
-   app, so both put the same paper in the tray.
+   Styles for the printed document.
 
-   Deliberately token-free. An official document is ink on paper, so it is
-   pinned to fixed black (#111315) and fixed point-like sizes rather than
-   following the app's theme — the sheet must not change when the app does.
+   This file controls the paper layout: letterhead, title, table and footer.
+   It is used both on dokumenti.html and when printing lists from the app.
 
-   The page box, the page breaks and the @page rule belong to <doc-page>
-   (assets/js/doc-page.js). Never add break-before/after or @page rules
-   here.
-   ══════════════════════════════════════════════════════════════════════ */
+   Print styles use fixed colors and sizes so the document always looks the same,
+   regardless of the app theme.
+
+   Page size, page breaks and @page rules are handled in <doc-page>
+   (assets/js/doc-page.js), so do not add them here.
+===============================================================================*/
+
 
 /* The component owns the sheet chrome; hide the unstyled markup until it
    upgrades so the pages never flash at full width. */
@@ -23,12 +21,14 @@ doc-page:not(:defined) { visibility: hidden; }
   .no-print { display: none !important; }
 }
 
-/* ── Sheet ───────────────────────────────────────────────────────────── */
+/*=============================================================================
+sheet
+===============================================================================*/
 
-/* Explicitly paginated pages are full-bleed by definition — <doc-page>
-   hands the whole sheet over and the content owns its insets, so the
-   printable margin lives here and nowhere else. 14mm clears the
-   unprintable edge of every common office printer. */
+/* Full-page print layouts handle their own spacing,
+   so the printable margin is set here.
+   14mm keeps the content clear of common printer edges. */
+
 .page {
   display: flex;
   flex-direction: column;
@@ -37,10 +37,9 @@ doc-page:not(:defined) { visibility: hidden; }
   color: #111315;
 }
 
-/* The measuring pass (documents.js) lays one throwaway page out here, at
-   the true A4 page width and at natural height, to read the real row and
-   chrome heights back out of the layout. Off-screen rather than
-   display:none — a hidden element has no geometry to measure. */
+/* documents.js uses this off-screen page to measure the real A4 layout.
+   It stays rendered so row and page element sizes can be measured.  */
+
 .doc-measure {
   position: absolute;
   top: 0;
@@ -51,7 +50,10 @@ doc-page:not(:defined) { visibility: hidden; }
 .doc-measure .page.is-probe { height: auto; overflow: visible; }
 .doc-measure .page.is-probe > * { flex-shrink: 0; }
 
-/* Letterhead */
+/*=============================================================================
+letterhead
+===============================================================================*/
+
 .doc-head {
   display: flex;
   align-items: flex-start;
@@ -94,7 +96,10 @@ doc-page:not(:defined) { visibility: hidden; }
 }
 .doc-comp-sub { margin-top: 2px; font-size: 10.5px; color: #3c4247; }
 
-/* Document title band */
+/*=============================================================================
+document title band
+===============================================================================*/
+
 .doc-title-band {
   display: flex;
   align-items: flex-end;
@@ -125,7 +130,10 @@ doc-page:not(:defined) { visibility: hidden; }
   color: #3c4247;
 }
 
-/* Table */
+/*=============================================================================
+table
+===============================================================================*/
+
 .doc-table {
   width: 100%;
   border-collapse: collapse;
@@ -160,13 +168,11 @@ doc-page:not(:defined) { visibility: hidden; }
 .doc-table tbody tr.is-group-inner { border-bottom: 0.5px solid #d6d9db; }
 .doc-table tbody tr.is-group-end { border-bottom: 1px solid #111315; }
 
-/* Totals row (`spec.foot`) — last page only, so it reads as the end of the
-   table and not as one more entry. Ruled off above rather than shaded,
-   because a shaded row photocopies as just another zebra stripe.
-   No document uses it today: summing everyone's points was dropped on
-   Filip's word — a point belongs to a competitor and through them to a
-   club, and the total of everybody's is nobody's. Kept for a list that
-   genuinely totals something, like a tatami schedule's running time. */
+/* Totals row (spec.foot) is shown only on the last page
+   so it clearly marks the end of the table.
+
+   It is not currently used, since competitor points are not added into one total.
+   It is kept for documents where a total makes sense, such as total tatami time.*/
 .doc-table tfoot td {
   padding: 6px 5px 3px;
   border-top: 1.5px solid #111315;
@@ -175,7 +181,10 @@ doc-page:not(:defined) { visibility: hidden; }
 .doc-table tfoot td.is-center,
 .doc-table tfoot td.is-right { font-variant-numeric: tabular-nums; }
 
-/* Totals line */
+/*=============================================================================
+totals
+===============================================================================*/
+
 .doc-summary {
   display: flex;
   justify-content: space-between;
@@ -186,7 +195,7 @@ doc-page:not(:defined) { visibility: hidden; }
 }
 .doc-summary-right { font-variant-numeric: tabular-nums; }
 
-/* Foot of the sheet — pushed down so the footer sits on the paper edge. */
+/* Foot of the sheet pushed down so the footer sits on the paper edge. */
 .doc-foot { margin-top: auto; padding-top: 22px; }
 
 .doc-signatures {
@@ -217,29 +226,22 @@ doc-page:not(:defined) { visibility: hidden; }
   color: #5a6065;
 }
 
-/* ── Tabla ────────────────────────────────────────────────────────────── */
+/*=============================================================================
+sorting table
+===============================================================================*/
 
-/* Raspored po borilištima: kolona je borilište, kartica je jedan nastup —
-   naslov grupe i spisak disciplina pod njim.
+/* Tatami schedule: each column is one tatami.
 
-   Namerno nije tabela. U tabeli je red vodoravna celina i visok je koliko
-   njegova najviša ćelija, pa borilište sa šesnaest stavki razvuče i ona
-   koja imaju po šest — i raspored koji staje na jedan list ispadne na tri.
-   Ovde svaka kolona teče sama za sebe.
-
-   Kolone su rastegnute na istu visinu (grid to radi sam), da linija koja
-   deli borilišta ide do dna najduže kolone, a ne da se prekida na pola. */
+   Each column flows on its own to save space.
+   Grid keeps all columns the same height. */
 .board {
   display: grid;
   grid-template-columns: repeat(var(--board-cols, 2), minmax(0, 1fr));
   column-gap: 11px;
   margin-top: 10px;
 }
-/* Slog table je jedini na listu koji sme da se smanji: renderer traži
-   najveću meru koja ceo raspored smešta na jedan list i tu meru upiše u
-   --board-scale. Zaglavlje lista, naslov i podnožje ostaju kakvi jesu, da
-   se raspored ne razlikuje od ostalih dokumenata ni po čemu osim po gustini
-   sopstvenog spiska. */
+/* The table is the only part that can shrink to fit on one page.
+   The header, title and footer stay the same size.*/
 .board-col {
   display: flex;
   flex-direction: column;
@@ -267,16 +269,15 @@ doc-page:not(:defined) { visibility: hidden; }
   text-transform: uppercase;
   line-height: 1.3;
 }
-/* Redni broj nastupa je oznaka, ne deo naslova — zato je u žlebu ispred
-   njega, sivlji i uže razmaknut. */
+/* The entry number is a label, so it is shown separately from the title
+   with lighter text and tighter spacing. */
 .board-card-no {
   margin-right: 4px;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
   color: #5a6065;
 }
-/* Spisak disciplina teče u red i prelama se — deset disciplina jedna ispod
-   druge napravilo bi karticu višu od lista. */
+/* Disciplines wrap into rows so the card does not become too tall. */
 .board-card-list {
   margin-top: 1px;
   font-size: calc(9px * var(--board-scale, 1));
@@ -284,20 +285,20 @@ doc-page:not(:defined) { visibility: hidden; }
   color: #2a3034;
 }
 
-/* ── Upis na diplomu ──────────────────────────────────────────────────── */
+/*=============================================================================
+diploma writing
+===============================================================================*/
 
-/* Diploma je već odštampana; ovde se na nju samo upisuje. Zato list nema
-   ništa od uobičajenog papira — ni zaglavlje, ni naslov, ni podnožje, ni
-   margine — nego prazninu i tekst na izmerenom mestu. Milimetri se broje od
-   ivice lista, jer je to jedino što se na diplomi meri lenjirom. */
+/* The diploma is already printed, so this page only adds text.
+   There is no header, footer or margin, and positions are measured from the page edge. */
 .page.is-slip {
   display: block;
   position: relative;
   padding: 0;
 }
 
-/* Levu ivicu i širinu upisuje renderer, u milimetrima: red je centriran na
-   izmerenom mestu, a širok tačno do pola razmaka do suseda na istoj visini. */
+/* The renderer sets the left position and width in millimeters.
+   The text is centered in the measured area. */
 .slip-line {
   position: absolute;
   text-align: center;
@@ -310,9 +311,8 @@ doc-page:not(:defined) { visibility: hidden; }
 }
 .slip-line.is-strong { font-weight: 600; }
 
-/* Lenjir postoji samo na probnom listu i namerno je svetao: štampa se na
-   običan papir koji se prislanja uz diplomu, pa mu treba tačnost, a ne
-   težina. */
+/* The ruler is only used on the test page.
+   It is kept light so it is easy to align with the diploma. */
 .slip-ruler {
   position: absolute;
   inset: 0;
@@ -353,8 +353,7 @@ doc-page:not(:defined) { visibility: hidden; }
   transform: translateX(-50%);
 }
 
-/* Uputstvo stoji na probnom listu, a ne u aplikaciji: čita ga onaj ko drži
-   papir u ruci, u trenutku kad mu treba. */
+/* Instructions are printed on the test page so they are available when needed. */
 .slip-note {
   position: absolute;
   top: 8mm;
@@ -365,11 +364,12 @@ doc-page:not(:defined) { visibility: hidden; }
   color: #3c4247;
 }
 
-/* ── Grana žreba ──────────────────────────────────────────────────────── */
+/*=============================================================================
+bracket branch
+===============================================================================*/
 
-/* Sve unutra je postavljeno apsolutno, u milimetrima, izračunato u
-   doc-render.js — meč u drugoj koloni mora da stoji tačno na sredini
-   između dva iz kojih izlazi, a to red i kolona ne umeju. */
+/*  Everything is positioned absolutely in millimeters by doc-render.js.
+   This keeps each match centered between the two matches leading into it. */
 .br { position: relative; margin-top: 8px; }
 
 .br-match { position: absolute; }
@@ -391,7 +391,7 @@ doc-page:not(:defined) { visibility: hidden; }
   text-transform: uppercase;
   color: #3c4247;
 }
-/* Broj meča u žlebu levo — tamo gde za oznaku iznad kutije nema visine. */
+/* The match number is placed in the left gutter because there is not enough space above the box. */
 .br-no {
   position: absolute;
   width: 4mm;
@@ -417,13 +417,11 @@ doc-page:not(:defined) { visibility: hidden; }
   flex: 1;
   min-width: 0;
   padding: 0 1.4mm;
-  /* Duga imena se seku sa tri tačke umesto da razvale kutiju — grana mora
-     da ostane na jednom listu. */
+  /* Long names are shortened with an ellipsis so the bracket stays on one page.*/
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* Kutijica za rezultat, desno od imena — popunjava je sudija na tatamiju. */
 .br-score {
   flex: none;
   width: 5.5mm;
@@ -433,7 +431,8 @@ doc-page:not(:defined) { visibility: hidden; }
 .br-slot.is-bye .br-name { color: #7d8388; }
 .br-slot.is-open .br-name { color: transparent; }
 
-/* Spojnice su tanke linije, svetlije od kutija — vode oko, ne otimaju ga. */
+/* Connector lines are thin and lighter than the boxes
+so they guide the eye without standing out.  */
 .br-link {
   position: absolute;
   border-top: 0.6px solid #9aa0a5;
@@ -445,7 +444,9 @@ doc-page:not(:defined) { visibility: hidden; }
   width: 0;
 }
 
-/* ── Mesta za upis osvojenih mesta ────────────────────────────────────── */
+/*=============================================================================
+final placements
+===============================================================================*/
 
 .br-places {
   display: flex;

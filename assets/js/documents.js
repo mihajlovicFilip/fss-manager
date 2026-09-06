@@ -1,16 +1,14 @@
 /**
- * Zvanični dokumenti — prijave na papiru, onako kako se predaju i overavaju.
+ * Official documents — entries on paper, as they are handed in and signed.
  *
- * Ovde su samo `spec`-ovi i traka koja ih bira. Merenje, prelom i zaglavlje
- * su u doc-render.js, zajednički sa dugmetom Štampaj u samoj aplikaciji, pa
- * dokument i lista odštampana iz aplikacije izlaze iz štampača kao da ih je
- * izdao isti savez.
+ * Only the specs and the toolbar live here. Measuring, pagination and the
+ * letterhead are in doc-render.js, shared with the app's Štampaj button,
+ * so both come out of the printer looking like the same federation.
  *
- * Tri vrste prijava se štampaju **svaka posebno**: po klubovima, po
- * kategorijama i po disciplinama. „Posebno" znači da svaki klub (kategorija,
- * disciplina) dobija **svoj list i svoju numeraciju** — „Strana 1 / 2" kreće
- * ispočetka na svakom, jer onaj ko drži list za jedan klub gleda koliko taj
- * spisak ima, a ne gde se zatekao u štosu od četrdeset.
+ * Entries print separately per club, per category and per discipline:
+ * each gets its own sheet and its own page numbering, because whoever
+ * holds one club's list cares how long that list is, not where it sits
+ * in a stack of forty.
  */
 
 import {
@@ -34,24 +32,23 @@ const sexLabel = (sex, plural = false) =>
   sex === 'M' ? (plural ? 'muškarci' : 'muški') : (plural ? 'žene' : 'ženski');
 
 /**
- * Ko šta overava.
- *
- * Prijava kluba je jedini dokument koji potpisuju **dve strane**: klub
- * predaje spisak, savez ga prima. Ostalo overava sudijski sto.
+ * Who signs what. The club entry sheet is the only two-party document:
+ * the club hands the list in, the federation receives it. Everything
+ * else is signed by the referee table.
  */
 const SIGNATURES = ['Glavni sudija', 'Delegat saveza'];
 const CLUB_SIGNATURES = ['Predstavnik kluba', 'Predstavnik saveza'];
 
-/** „68 kg", „+76 kg", ali „apsolutna" ostaje kako jeste — nije telesna težina. */
+/** "68 kg", "+76 kg" — but "apsolutna" stays as is, it is not a weight. */
 const weightLabel = (weight) => {
   if (!weight) return '';
   return /^[+\d]/.test(weight) ? `${weight} kg` : weight;
 };
 
 /**
- * Ime kategorije. Po čemu se deli govori pravilnik, ne ime discipline:
- * tradicionalni kumite je apsolutan pa mu se telesna težina ne piše, a
- * sportski se deli po njoj iako se zove slično.
+ * Category name. What splits a category comes from the rulebook, not the
+ * discipline name: traditional kumite is open, sport kumite splits by
+ * weight even though the names are similar.
  */
 function categoryTitle(entry) {
   const age = ageByCode(entry.group);
@@ -63,27 +60,27 @@ function categoryTitle(entry) {
   return parts.filter(Boolean).join(' · ');
 }
 
-/** Isto, ali u jednom redu tabele — bez pola, jer on stoji u svojoj koloni. */
+/** Same, for a table row — without sex, which has its own column. */
 const categoryCell = (entry) => {
   const parts = categoryTitle(entry).split(' · ');
   parts.splice(2, 1);
   return parts.join(' · ');
 };
 
-/** Redosled kategorija je redosled pravilnika, ne azbuka. */
+/** Category order follows the rulebook, not the alphabet. */
 const categoryOrder = (a, b) =>
   (disciplineByName(a.discipline)?.order || 99) - (disciplineByName(b.discipline)?.order || 99)
   || a.group.localeCompare(b.group)
   || a.sex.localeCompare(b.sex)
   || String(a.weight || a.level || '').localeCompare(String(b.weight || b.level || ''), 'sr');
 
-/** Na koje borilište je ta kategorija raspoređena; prazno ako nije. */
+/** Which mat the category is assigned to; empty if none. */
 function matOf(entry, plan) {
   const mat = plan?.pairs?.[`${entry.group}-${entry.sex}|${entry.discipline}`];
   return mat >= 1 ? `Borilište ${mat}` : '';
 }
 
-/** Grupiše prijave u redosledu u kom se i štampaju. */
+/** Groups entries in the order they print. */
 function groupBy(entries, key) {
   const groups = new Map();
   entries.forEach((entry) => {
@@ -94,12 +91,12 @@ function groupBy(entries, key) {
   return groups;
 }
 
-// ── Dokumenti ──────────────────────────────────────────────────────────
+// === Documents =============================================
 
 /**
- * Svaka vrsta vraća **spisak delova**. Vrsta koja se štampa u komadu vraća
- * jedan deo; one koje se štampaju posebno vraćaju po jedan na svaki klub,
- * kategoriju ili disciplinu.
+ * Every document type returns a list of parts: one part for types that
+ * print whole, one per club/category/discipline for those that print
+ * separately.
  */
 const DOCUMENTS = [
   {
@@ -128,9 +125,9 @@ const DOCUMENTS = [
           ],
         }));
 
-        // Ekipe se upisuju pod istim spiskom: klub je prijavio i njih, pa
-        // ono što potpisuje mora da ih vidi. Članovi jedne ekipe drže se
-        // zajedno i ne prelamaju se na dve strane.
+        // Teams go on the same list: the club entered them too, so the
+        // sheet it signs must show them. A team's members stay together
+        // and never break across two pages.
         teams.forEach((team, ti) => {
           team.members.forEach((m, mi) => {
             const last = mi === team.members.length - 1;
@@ -196,8 +193,8 @@ const DOCUMENTS = [
         const club = clubByName(name);
         const teams = registry.teams.filter((t) => t.club === name);
 
-        // Jedan red na takmičara, ne na prijavu: ovo je račun, a ne spisak —
-        // ime se ne ponavlja, uz njega stoji broj kotizacija koje duguje.
+        // One row per competitor, not per entry: this is a bill, so a
+        // name appears once, with the number of fees it owes.
         const byCompetitor = new Map();
         registry.entries.filter((e) => e.club === name).forEach((e) => {
           if (!byCompetitor.has(e.competitorId)) byCompetitor.set(e.competitorId, []);
@@ -227,8 +224,8 @@ const DOCUMENTS = [
           ],
         }));
 
-        // Ekipa se plaća kao celina, pa ide svojim redom — a članovi se uz nju
-        // samo imenuju, da se ne bi tražili po drugom listu.
+        // A team is paid as a whole, so it gets its own row — members
+        // are just named, so nobody hunts for them on another sheet.
         teams.forEach((team, ti) => {
           rows.push({
             zebra: (people.length + ti) % 2 === 1,
@@ -264,9 +261,9 @@ const DOCUMENTS = [
               col('Kotizacija', '66px', 'center'), col('Iznos', '78px', 'right'),
             ],
             rows,
-            // Zbir mora da bude zbir onoga što u koloni piše: ekipa je jedan
-            // red sa jednom prijavom, pa i u ukupnom broju stoji kao jedna.
-            // Tako se i čita: prijava − besplatno = kotizacija.
+            // The total must equal what the column shows: a team is one
+            // row with one entry, so it counts as one. It reads as
+            // entries − free = fees.
             foot: [
               cell(null), cell('Ukupno', 'left', true), cell(null), cell(null),
               cell(zbir.entries + teams.length, 'center'), cell(zbir.free || '—', 'center'),
@@ -342,8 +339,8 @@ const DOCUMENTS = [
         .sort((a, b) => (disciplineByName(a[0])?.order || 99)
           - (disciplineByName(b[0])?.order || 99))
         .map(([discipline, entries]) => {
-          // Unutar discipline se ide kategorija po kategorija — tako se i
-          // sudi. Kategorija se drži na jednoj strani.
+          // Within a discipline it goes category by category — that is
+          // how it is judged. A category stays on one page.
           const cats = [...groupBy(entries, categoryKey).values()]
             .sort((a, b) => categoryOrder(a[0], b[0]));
 
@@ -413,8 +410,8 @@ const DOCUMENTS = [
             groupEnd: last,
             cells: [
               cell(mi === 0 ? ti + 1 : null, 'center'),
-              // Vrsta ekipe uz ime discipline — enbu ima muški i mešoviti
-              // par, i to je razlika koja se sa spiska mora videti.
+              // Team variant next to the discipline name — enbu has a
+              // men's and a mixed pair, and the list must show which.
               cell(mi === 0
                 ? [team.discipline, team.variantLabel].filter(Boolean).join(' · ')
                 : null, 'left', true),
@@ -494,7 +491,7 @@ const DOCUMENTS = [
   },
 ];
 
-/** Srpska množina — ista pravila kao u aplikaciji. */
+/** Serbian plural — same rules as in the app. */
 function plural(n, one, few, many) {
   const d = n % 10, dd = n % 100;
   if (d === 1 && dd !== 11) return one;
@@ -502,7 +499,7 @@ function plural(n, one, few, many) {
   return many;
 }
 
-// ── Traka i iscrtavanje ────────────────────────────────────────────────
+// === Toolbar and rendering =============================================
 
 /** Popunjava ih `start()` iz baze pre prvog iscrtavanja. */
 let registry = { competitors: [], entries: [], teams: [] };
@@ -517,7 +514,7 @@ const metaLabel = document.getElementById('doc-meta');
 
 const docById = (id) => DOCUMENTS.find((d) => d.id === id) || DOCUMENTS[0];
 
-/** #klubovi ili #klubovi/KK Niš — vrsta i, iza kose crte, jedan njen deo. */
+/** #klubovi or #klubovi/KK Niš — the type and, after the slash, one part. */
 const routeOf = () => {
   const [id, key] = decodeURIComponent(location.hash.slice(1)).split('/');
   return { doc: docById(id), key: key || '' };
@@ -535,8 +532,8 @@ function render() {
 
   const doc = docById(current);
   const parts = doc.parts({ registry, plan, fees });
-  // Izabran deo koji je u međuvremenu nestao (klub bez ijedne prijave) ne
-  // sme da ostavi prazan list — vraća se na sve.
+  // A selected part that no longer exists (a club with no entries) must
+  // not leave a blank sheet — fall back to all.
   if (pick && !parts.some((p) => p.key === pick)) pick = '';
   const shown = pick ? parts.filter((p) => p.key === pick) : parts;
 
@@ -559,7 +556,7 @@ function render() {
     btn.setAttribute('aria-selected', String(btn.dataset.type === current));
   });
 
-  // Birač dela postoji samo tamo gde delova ima više od jednog.
+  // The part picker exists only where there is more than one part.
   const many = parts.length > 1;
   pickList.hidden = !many;
   if (many) {
@@ -574,10 +571,9 @@ function render() {
 }
 
 /**
- * Spisak svih kategorija ume da bude nekoliko stotina dokumenata, a svaki se
- * meri pre nego što se prelomi. Zato se traci prvo pusti da ispiše da radi,
- * pa se tek u sledećem kadru crta — bez toga strana stoji zaleđena bez reči
- * o tome šta se dešava.
+ * The category list can be a few hundred documents, each measured before
+ * it breaks. The toolbar first gets a frame to say it is working, and the
+ * drawing happens on the next one — otherwise the page just freezes.
  */
 function scheduleRender() {
   metaLabel.textContent = 'Priprema…';
@@ -616,20 +612,12 @@ window.addEventListener('hashchange', () => {
 document.getElementById('doc-print').addEventListener('click', () => window.print());
 
 /**
- * Učitava aktuelno takmičenje i njegove prijave, pa iscrtava. Dokumenti
- * uvek prikazuju ono takmičenje koje je izabrano u aplikaciji — nema
- * zasebnog izbora ovde, da se ne bi desilo da se štampa jedno a na ekranu
- * stoji drugo.
- */
-/**
- * Otisak zatečenih podataka — po njemu se zna da li se od poslednjeg
- * iscrtavanja nešto promenilo.
+ * Fingerprint of the loaded data — tells whether anything changed since
+ * the last render.
  *
- * Postoji zbog jednog konkretnog dana: na dan takmičenja se ovaj list štampa
- * po klubu, predstavnik kluba proverava spisak, ispravka se unese **u
- * aplikaciji, u drugom prozoru** — i onda se ovde štampa ponovo, za potpis.
- * Bez ovoga bi taj drugi otisak izašao iz zatečenog prikaza, pa bi se
- * potpisao spisak koji u bazi više ne stoji tako.
+ * Exists for one concrete day: a club sheet is printed, a correction is
+ * made in the app in another window, and the sheet is printed again for
+ * signing. Without this, the second print would come from the stale view.
  */
 const fingerprint = (reg, comp, price) => [
   comp?.id, comp?.status, JSON.stringify(price || {}),
@@ -661,9 +649,9 @@ async function start() {
   }
   render();
 
-  // Paginacija se meri, pa mora da se meri u pravom pismu. Prvo iscrtavanje
-  // ume da stigne pre nego što je Barlow raščitan — kad fontovi legnu,
-  // premeri se.
+  // Pagination is measured, so it must be measured in the real typeface.
+  // The first render can beat the Barlow load — once fonts settle,
+  // measure again.
   if (document.fonts && document.fonts.ready) {
     document.fonts.ready.then(() => {
       if (document.fonts.status === 'loaded') render();
@@ -672,9 +660,9 @@ async function start() {
 }
 
 /**
- * Kad se čovek vrati na ovu stranu, podaci se pročitaju ponovo — i list se
- * prekraja **samo ako se zaista nešto promenilo**. Prekrajanje svih
- * kategorija traje, pa se ne radi bez potrebe.
+ * When the user returns to this page, data is re-read — and the sheet is
+ * rebuilt only if something actually changed, because rebuilding every
+ * category takes a while.
  */
 async function refresh() {
   if (document.hidden || !competition) return;

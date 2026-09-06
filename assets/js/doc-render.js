@@ -20,7 +20,7 @@
 
 import { FEDERATION } from './data.js';
 
-// ── Small helpers ──────────────────────────────────────────────────────
+// === Small helpers =============================================
 
 export const esc = (v) => String(v).replace(/[&<>"]/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]
@@ -64,7 +64,7 @@ export const stamp = (d = new Date()) =>
 
 export const uniqueCount = (items, key) => new Set(items.map(key)).size;
 
-// ── Pagination ─────────────────────────────────────────────────────────
+// === Pagination =============================================
 
 /** Maximal runs of rows sharing a `groupId` — a team must not be split. */
 function blocksOf(rows) {
@@ -169,7 +169,7 @@ function balanceTail(pages, heightOf, space) {
   }
 }
 
-// ── Rendering ──────────────────────────────────────────────────────────
+// === Rendering =============================================
 
 /**
  * One sheet.
@@ -256,20 +256,19 @@ ${summary}
     </section>`;
 }
 
-// ── Grana žreba ────────────────────────────────────────────────────────
+// === Bracket =============================================
 
 /*
- * Grana se ne slaže u tabelu — meč u drugoj koloni stoji tačno na sredini
- * između dva meča iz kojih izlazi, a to je geometrija, ne red i kolona.
- * Zato se svaki meč i svaka spojnica postavljaju apsolutno, u milimetrima,
- * izračunato iz veličine grane. U milimetrima jer je odredište papir: ono
- * što se ovde izračuna izađe iz štampača tačno te veličine.
+ * A bracket is not a table — a second-round match sits exactly between
+ * the two matches feeding it. Every match and connector is positioned
+ * absolutely, in millimetres, because the destination is paper: what is
+ * computed here comes out of the printer at exactly that size.
  */
 
 /**
- * Mere po veličini grane, u milimetrima. Grana od 32 mora da stane na istu
- * stranu kao grana od 8, pa se sve steže — ime u kutiji od 26 mm se preloma
- * u tri tačke, ali cela grana ostaje na jednom listu, što je važnije.
+ * Sizes per bracket size, in millimetres. A bracket of 32 must fit the
+ * same page as one of 8, so everything tightens — long names get cut with
+ * an ellipsis, but the whole bracket stays on one sheet.
  */
 const BRACKET_SIZE = {
   2:  { slot: 9,   gap: 12,  box: 52, score: 9, link: 9, font: 10.5, tag: true },
@@ -280,13 +279,13 @@ const BRACKET_SIZE = {
 };
 
 /**
- * Crta jednu granu.
+ * Draws one bracket.
  *
- * Do 16 mesta svaki meč nosi oznaku iznad kutije („R16 · meč 1"), kao na
- * zvaničnoj grani. Na 32 za to nema visine, pa oznaka runde ide u zaglavlje
- * kolone a broj meča u uski žleb levo — isti podatak, četvrtina prostora.
+ * Up to 16 slots each match carries a tag above its box ("R16 · meč 1").
+ * At 32 there is no height for that, so the round name moves to the
+ * column header and the match number to a narrow gutter on the left.
  *
- * @returns {{html: string, width: number, height: number}} mere u mm
+ * @returns {{html: string, width: number, height: number}} sizes in mm
  */
 export function bracketHtml(bracket) {
   const m = BRACKET_SIZE[bracket.size] || BRACKET_SIZE[32];
@@ -300,8 +299,8 @@ export function bracketHtml(bracket) {
   const height = headH + first * pitch - m.gap;
   const width = bracket.rounds.length * columnW - m.link;
 
-  // Sredina svakog meča: prva runda je ravnomerna, svaka sledeća sedi tačno
-  // između dva meča iz kojih izlazi.
+  // Centre of every match: the first round is even, each later match
+  // sits exactly between the two feeding it.
   const centres = [];
   bracket.rounds.forEach((round, r) => {
     centres[r] = round.matches.map((unused, i) => (r === 0
@@ -313,8 +312,8 @@ export function bracketHtml(bracket) {
 
   bracket.rounds.forEach((round, r) => {
     const left = r * columnW;
-    // U zbijenom prikazu ime runde stoji u zaglavlju kolone — svake, ne
-    // samo prve, jer se sa lista poziva „četvrtfinale, meč 3".
+    // In the compact layout the round name heads every column — matches
+    // are called out as "quarterfinal, match 3" from the sheet.
     if (!m.tag) {
       parts.push(`<div class="br-col" style="left:${left}mm;width:${m.box + m.score}mm">${
         esc(round.name)}</div>`);
@@ -339,8 +338,8 @@ export function bracketHtml(bracket) {
           i + 1}</div>`);
       }
 
-      // Spojnica: iz oba meča prethodne runde u ovaj — vodoravno do sredine
-      // razmaka, uspravno između njih, pa vodoravno u ovaj meč.
+      // Connector: from both feeding matches into this one — horizontal
+      // to the middle of the gap, vertical between them, then across.
       if (r > 0) {
         const fromX = (r - 1) * columnW + m.box + m.score;
         const midX = fromX + m.link / 2;
@@ -361,7 +360,7 @@ export function bracketHtml(bracket) {
   };
 }
 
-// ── Measuring ──────────────────────────────────────────────────────────
+// === Measuring =============================================
 
 /** The sheet <doc-page size="a4"> hands each page, per orientation. */
 export const PAGE_SIZE = {
@@ -442,25 +441,19 @@ export function measure(spec, { context, printedAt, orientation }) {
   };
 }
 
-/* ── Tabla ────────────────────────────────────────────────────────────── */
+// === Board =============================================
 
 /*
- * Tabla je raspored po borilištima: **kolona po borilištu, kartica po
- * nastupu**.
+ * The board is the mat schedule: a column per mat, a card per event.
  *
- * Tabela to ne ume. U njoj je red vodoravna celina, pa mora da bude visok
- * koliko i njegova najviša ćelija — raspored u kom jedno borilište ima
- * šesnaest stavki a ostala po šest zato ispadne tri lista, od kojih su dva
- * gotovo prazna. Tabla umesto reda ima kolonu koja teče sama za sebe:
- * kartica se stavlja tamo gde ima mesta, a ne u red koji čeka najdužu
- * kolonu, pa isti raspored stane na jedan list.
- *
- * Prelama se po kolonama: kad se strana napuni, kolona se nastavlja na
- * sledećoj, ispod istog zaglavlja. Prelom se, kao i kod tabele, računa iz
- * izmerene visine, a ne iz procene.
+ * A table cannot do this — a row must be as tall as its tallest cell, so
+ * one busy mat would stretch the whole layout across three mostly empty
+ * sheets. Each board column flows on its own instead, so the same layout
+ * fits one sheet. Page breaks are computed from measured heights, per
+ * column, with the header repeated on every page.
  */
 
-/** Jedna kartica: redni broj nastupa, naslov i spisak pod njim. */
+/** One card: event number, title, and the list under it. */
 export const boardCard = (order, head, items = []) => ({ order, head, items });
 
 const boardCardHtml = (card) => `
@@ -470,7 +463,7 @@ const boardCardHtml = (card) => `
             <div class="board-card-list">${card.items.map(esc).join(' · ')}</div>` : ''}
           </div>`;
 
-/** Jedna strana table: zaglavlja svih kolona i kartice koje su na nju stale. */
+/** One board page: all column headers plus the cards that fit on it. */
 function boardPageHtml(board, slices, scale = 1) {
   return `
       <div class="board" style="--board-cols:${board.columns.length};--board-scale:${scale}">${board.columns.map((column, i) => `
@@ -481,10 +474,10 @@ function boardPageHtml(board, slices, scale = 1) {
 }
 
 /**
- * Meri tablu: koliko visine kolona ima na raspolaganju i kolika je svaka
- * kartica. Cela tabla se za to jednom položi van ekrana, na pravoj širini
- * lista — kartica prelomljena na dva reda visoka je dvostruko, a to se ne
- * može znati unapred.
+ * Measures the board: the height a column has available and the height of
+ * every card. The whole board is laid out once off screen at the true
+ * page width — a card that wraps to two lines is twice as tall, and that
+ * cannot be known in advance.
  */
 function measureBoard(spec, { context, printedAt, orientation, scale = 1 }) {
   const host = ensureMeasureHost();
@@ -508,8 +501,8 @@ function measureBoard(spec, { context, printedAt, orientation, scale = 1 }) {
 
   const columns = [...board.querySelectorAll('.board-col')];
   const gap = parseFloat(getComputedStyle(columns[0] || board).rowGap) || 0;
-  // Zaglavlje kolone se ponavlja na svakoj strani, pa ga jednom oduzmemo od
-  // raspoložive visine umesto da ga svaki put računamo.
+  // The column header repeats on every page, so it is subtracted from
+  // the available height once.
   const headHeight = Math.max(0, ...columns.map(
     (c) => c.querySelector('.board-head')?.getBoundingClientRect().height || 0,
   ));
@@ -524,7 +517,7 @@ function measureBoard(spec, { context, printedAt, orientation, scale = 1 }) {
   };
 }
 
-/** Kartice po stranama — svaka kolona se puni za sebe. */
+/** Cards per page — each column fills on its own. */
 function paginateBoard(board, { heights, gap, space }) {
   const pages = [];
   const pageAt = (i) => {
@@ -538,8 +531,8 @@ function paginateBoard(board, { heights, gap, space }) {
     column.cards.forEach((card, i) => {
       const height = heights[c]?.[i] || 0;
       const need = used ? used + gap + height : height;
-      // Kartica viša od lista ostaje cela na svojoj strani — nema šta da se
-      // preseče na pola.
+      // A card taller than the page stays whole on its own page —
+      // there is nothing sensible to cut in half.
       if (used && need > space) { page += 1; used = height; } else { used = need; }
       pageAt(page)[c].push(card);
     });
@@ -549,13 +542,10 @@ function paginateBoard(board, { heights, gap, space }) {
 }
 
 /**
- * Bira kako će tabla na papir: prvo položaj lista, pa veličinu sloga.
- *
- * Traži se **jedan list**, sa najvećim slovom koje na njega staje. Uspravan
- * list je viši, pa kolonu sa mnogo kartica često primi tamo gde ga položen
- * ne bi — zato se oba probaju, tim redom koji raspored zatraži. Smanjuje se
- * tek kad nijedan položaj ne pomogne, i to samo do granice ispod koje se
- * spisak na zidu više ne bi pročitao.
+ * Picks how the board goes on paper: orientation first, then type size.
+ * The goal is one sheet with the largest type that fits. Both
+ * orientations are tried before scaling down, and scaling stops at the
+ * point where a list on a wall would stop being readable.
  */
 const BOARD_SCALES = [1, 0.94, 0.88, 0.82];
 
@@ -588,33 +578,27 @@ function renderBoard(spec, board, { pages, scale }, { context, total, printedAt,
   })).join('');
 }
 
-/* ── Upis na već odštampan papir ──────────────────────────────────────── */
+// === Writing on pre-printed paper =============================================
 
 /*
- * Diploma je **tuđi papir**. Odštampana je unapred, u tiražu, sa gotovim
- * tekstom i praznim linijama; posle takmičenja se u te linije upisuje ko je
- * šta osvojio. Aplikacija tu ne crta dokument nego pogađa mesto — zato list
- * ovde nema ni zaglavlje, ni naslov, ni podnožje, ni margine: samo tekst,
- * na milimetar tamo gde je urednik izmerio da na diplomi ima mesta.
+ * A diploma is somebody else's paper, printed in advance with blank
+ * lines. The app does not draw a document — it hits a measured spot:
+ * no letterhead, no title, no margins, just text placed to the
+ * millimetre where the editor measured space on the diploma.
  *
- * Milimetri se broje od ivice lista, a ne od ivice otiska, jer je to jedino
- * što se na diplomi može izmeriti lenjirom. Koliko od toga štampač zaista
- * može da otisne razlikuje se od uređaja do uređaja — zbog toga postoji
- * probni list, a ne zbog nesigurnosti u računicu.
+ * Millimetres count from the edge of the sheet, because that is the only
+ * thing a ruler can measure on a diploma. What a given printer can
+ * actually reach varies — that is what the test sheet is for.
  */
 
-/** Jedan red upisa: šta piše i gde stoji. */
+/** One written line: what it says and where it sits. */
 export const slipLine = (text, { top, x = 0, size, caps = false, strong = false }) =>
   ({ text, top, x, size, caps, strong });
 
 /**
- * Koliko je koji red širok.
- *
- * Dva upisa umeju da stoje na istoj visini — „1. mesto" levo, disciplina
- * desno, jer diploma tako i piše: „осваја ___ место у дисциплини ___". Da
- * dugo ime discipline ne bi prešlo preko mesta, red se drži unutar polovine
- * razmaka do suseda na istoj visini; što ne stane, prelama se naniže umesto
- * da se pruži postrance.
+ * How wide each line may be. Two lines can share a height — place on the
+ * left, discipline on the right — so each is held to half the gap to its
+ * neighbour; what does not fit wraps down instead of spreading sideways.
  */
 function slipWidths(lines, width) {
   const half = width / 2 - 8;
@@ -652,12 +636,10 @@ function slipLineHtml(line, reach) {
 }
 
 /**
- * Lenjir na probnom listu.
- *
- * Uz obe ivice ide skala u milimetrima od gornje ivice, a preko sredine
- * uspravna linija sa skalom levo i desno od nje — tačno tri mere koje
- * podešavanje traži. Probni list se štampa na običan papir i prisloni uz
- * diplomu prema svetlu; ono što se sa lenjira pročita upisuje se u polja.
+ * The ruler on the test sheet: a millimetre scale along both edges and a
+ * centre line with a scale left and right of it — the three measurements
+ * the setup asks for. Printed on plain paper and held against the
+ * diploma to the light.
  */
 function slipRulerHtml({ width, height }) {
   const parts = [];
@@ -685,7 +667,7 @@ function slipRulerHtml({ width, height }) {
       </div>`;
 }
 
-/** Jedan list po diplomi — bez numeracije, jer je papir već sam svoj. */
+/** One sheet per diploma — no page numbers, the paper is its own. */
 function renderSlips(spec) {
   return spec.slips.map((slip) => {
     const reach = slipWidths(slip.lines, slip.size?.width || 210);
@@ -698,11 +680,9 @@ function renderSlips(spec) {
 }
 
 /**
- * Uvodne strane — sve što nije tabela: grana žreba, naslovna, šta god.
- *
- * Svaka je svoja strana i sama zna svoju visinu, pa se ne meri i ne prelama.
- * Numeracija ide kroz ceo dokument: uvodne strane i tabela iza njih su
- * **jedan dokument**, jer je grana bez spiska takmičara pola posla.
+ * Lead pages — everything that is not a table: a bracket, a cover page.
+ * Each is its own page and knows its own height, so it is not measured
+ * or split. Page numbering runs through the whole document.
  */
 function renderLeads(spec, leads, { context, total, printedAt, offset = 0 }) {
   return leads.map((lead, i) => renderPage({
@@ -722,8 +702,8 @@ function renderLeads(spec, leads, { context, total, printedAt, offset = 0 }) {
 }
 
 /**
- * Jedan dokument u HTML: uvodne strane, pa tabla, pa tabela — u tom redu, sa
- * numeracijom koja teče kroz sve tri, jer je to **jedan dokument**.
+ * One document in HTML: lead pages, then the board, then the table — one
+ * document, one running page count.
  */
 function renderDocument(spec, { context, printedAt, orientation, pinned = false }) {
   const rows = spec.rows || [];
@@ -734,8 +714,8 @@ function renderDocument(spec, { context, printedAt, orientation, pinned = false 
   const board = spec.board
     ? fitBoard(spec, { context, printedAt, orientation, pinned })
     : null;
-  // Tabla sama bira položaj lista; ostatak dokumenta ide za njom, jer je
-  // <doc-page> jedan format papira za ceo štos.
+  // The board picks the orientation; the rest of the document follows,
+  // because <doc-page> pins one paper format for the whole job.
   const side = board?.orientation || orientation;
 
   let chunks = [];
@@ -794,8 +774,8 @@ export function renderAllInto(sheet, jobs, { orientation = 'portrait', printedAt
   let html = '';
   let pages = 0;
   usable.forEach(({ spec, context }) => {
-    // Štos je jedan format papira od početka do kraja — dokument u njemu ne
-    // sme sam da okrene list.
+    // A stack is one paper format start to finish — no document in it
+    // may flip the page on its own.
     const out = renderDocument(spec, { context, printedAt, orientation, pinned: true });
     html += out.html;
     pages += out.total;

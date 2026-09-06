@@ -1,13 +1,11 @@
 /**
- * Ljuska aplikacije: navigacija, kontrolna tabla i evidencija takmičenja.
+ * App shell: navigation, dashboard and competition records.
  *
- * Ekrani se biraju hash rutom (#kontrolna-tabla, #takmicenja …), pa je svaki
- * linkabilan i preživljava osvežavanje. Modul za dokumenta je zasebna strana
- * (documents.html) jer je štampani prikaz sa svojim pravilima.
+ * Screens use hash routes, so they can be linked directly and survive refreshes.
+ * Documents use a separate page because printing has its own layout rules.
  *
- * Podaci dolaze isključivo iz store.js. Ništa na ekranu nije upisano rukom:
- * ono što se još ne može izračunati prikazano je kao prazno stanje, a ne kao
- * izmišljen broj.
+ * All data comes from store.js. Missing values are shown as empty states,
+ * not as made-up numbers.
  */
 
 import {
@@ -23,13 +21,13 @@ import { drawCategory, MAX_BRACKET } from './draw.js';
 import { setPrintable, printNow, printStack, visibleIds, onScreen, filterLabel } from './print.js';
 import { readEntryFile } from './import.js';
 
-// ── Sitni pomoćnici ────────────────────────────────────────────────────
+// === Helpers =============================================
 
 const esc = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]
 ));
 
-/** 1486 → "1 486" — razmak kao separator hiljada, kako se piše kod nas. */
+/** Format thousands with a space, for example 1486 becomes "1 486". */
 const num = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 
 const plural = (n, one, few, many) => {
@@ -41,12 +39,10 @@ const plural = (n, one, few, many) => {
 
 const uniq = (items, key) => new Set(items.map(key));
 
-// ── Ekrani ─────────────────────────────────────────────────────────────
+// === Screens =============================================
 
-/**
- * Redosled je redosled u navigaciji. Ekran bez `view` postoji kao plan, ne kao
- * zaslon — klik vodi na opis šta tu dolazi, umesto u ćorsokak.
- */
+/* Navigation order follows the menu.
+ * Items without a view are planned screens and open a short description instead. */
 const SCREENS = [
   { id: 'kontrolna-tabla', label: 'Kontrolna tabla', view: 'dashboard',
     kicker: () => FEDERATION.name, title: 'Kontrolna tabla' },
@@ -96,13 +92,9 @@ const NAV_MAIN = ['kontrolna-tabla', 'takmicenja', 'uvoz', 'takmicari',
 
 const screenById = (id) => SCREENS.find((s) => s.id === id);
 
-// ── Izvedene brojke ────────────────────────────────────────────────────
-
-/**
- * Sve što kontrolna tabla prikazuje, izračunato iz registra. `pending: true`
- * označava brojku koja se još ne može dobiti — prikazuje se kao crta, ne kao
- * nula, jer nula ovde znači nešto sasvim drugo.
- */
+// === Derived values =============================================
+/* Dashboard values are calculated from the registry.
+ * pending: true means the value is not available yet, so it is shown as a dash instead of zero. */
 function summarise(registry, competition) {
   const { competitors, entries, teams } = registry;
   const active = competition?.disciplines?.length || DISCIPLINES.length;
@@ -121,10 +113,8 @@ function summarise(registry, competition) {
   ];
 }
 
-/**
- * Provere nad registrom. Vraća samo ono što je zaista sporno — kad je sve
- * čisto, tabla to i kaže umesto da izmišlja stavke.
- */
+/* Checks the registry and returns only real issues.
+ * If everything is fine, no issues are shown. */
 function checks(registry) {
   const { entries } = registry;
   const found = [];
@@ -160,13 +150,11 @@ function checks(registry) {
   return found;
 }
 
-// ── Stanje takmičenja ──────────────────────────────────────────────────
+// === Competition state =============================================
 
-/**
- * Prelazi kroz koje takmičenje prolazi, i nazad. Svaki je povratan namerno —
- * prijava koja stigne posle roka i ispravka rezultata su svakodnevica, pa
- * zatvaranje ne sme da bude jednosmerna ulica.
- */
+/* Competition status can move forward or backward.
+ * Late entries and result corrections may require reopening a previous stage. */
+
 function statusActions(status) {
   switch (status) {
     case 'Nacrt':
@@ -185,7 +173,7 @@ function statusActions(status) {
   }
 }
 
-// ── Kontrolna tabla ────────────────────────────────────────────────────
+// === Dashboard =============================================
 
 function dashboardHtml({ competition, registry, demoStale }) {
   if (!competition) {
@@ -206,8 +194,8 @@ function dashboardHtml({ competition, registry, demoStale }) {
       <div class="stat-note">${esc(s.note)}</div>
     </div>`).join('');
 
-  // Baza sa starijim demoom se sama osveži samo dok je netaknuta. Kad
-  // korisnik već ima svoj rad u njoj, ne dira se — nego se ovde ponudi.
+// Older demo data is refreshed only if the database is still untouched.
+// If the user already has their own data, it is left unchanged.
   const stale = demoStale ? {
     title: 'Demo podaci su stariji od aplikacije',
     note: 'Vraćanje demo podataka briše sve iz baze.',
@@ -268,7 +256,7 @@ function dashboardHtml({ competition, registry, demoStale }) {
     </div>`;
 }
 
-// ── Takmičenja ─────────────────────────────────────────────────────────
+// === Competitions =============================================
 
 function competitionsHtml({ competitions, activeId, counts }) {
   if (!competitions.length) {
@@ -315,15 +303,14 @@ function competitionsHtml({ competitions, activeId, counts }) {
     </table>`;
 }
 
-// ── Takmičari ──────────────────────────────────────────────────────────
+// === COmpetitors =============================================
 
 /**
- * Spisak pojedinačnih takmičara na aktuelnom takmičenju, sa osvojenim
- * medaljama i bodovima.
+ * Competitors in the current competition, with medals and points.
  *
- * Dve kolone bodova rade dva različita posla: „Bodovi" su učinak na ovom
- * takmičenju, „Ukupno" je zbir kroz sve sezone koje baza pamti. Isti čovek se
- * prepoznaje po broju licence, pa se bodovi sabiraju i kad promeni klub.
+ * "Bodovi" shows the result from this competition.
+ * "Ukupno" shows points across all stored seasons.
+ * Competitors are matched by license number, even if they change clubs.
  */
 function competitorsHtml({ competition, registry, tally }) {
   if (!competition) {
@@ -355,15 +342,15 @@ function competitorsHtml({ competition, registry, tally }) {
     entriesByCompetitor.get(e.competitorId).push(e);
   });
 
-  // Na B listi kolona bodova ostaje prazna, pa mora da se kaže zašto —
-  // inače izgleda kao da plasmani nisu upisani.
+// Points stay empty on the B list, so the UI explains why
+// instead of making it look like results are missing.
   const notice = calendarOf(competition) === 'B' ? `
     <div class="notice">Takmičenje je na <b>B listi</b> — plasmani i medalje se
     beleže kao i svuda, ali ne nose bodove, pa su kolone „Bodovi" i „Ukupno"
     prazne za ovo takmičenje.</div>` : '';
 
-  // Ispravka prijave ima svoj rok: dok su prijave otvorene. Posle toga se
-  // kolona i ne iscrtava, a napomena kaže gde se rok vraća.
+// Entries can only be corrected while registration is open.
+// After that, the column is hidden and a note explains how to reopen it.
   const open = entriesOpen(competition);
   const frozen = open ? '' : `
     <div class="notice">Prijave su zatvorene — podaci se više ne menjaju.
@@ -432,20 +419,13 @@ function competitorsHtml({ competition, registry, tally }) {
 }
 
 /**
- * Ispravka jedne prijave.
+ * Edit a single entry while registration is open.
  *
- * Klubovi šalju formulare, formulari se uvoze — i tu se s vremena na vreme
- * nađe pogrešan pol ili promašeno godište. Dok su prijave otvorene, to mora
- * da se ispravi ovde: posle zatvaranja je spisak zamrznut, jer ono što je
- * odštampano i ono što je u bazi mora da bude ista stvar.
- *
- * Dijalog **ne pušta da se upiše nemoguće**: uzrasna grupa se računa iz
- * godišta, ponuđene su samo discipline moguće za tu grupu, a telesne težine
- * samo one koje pravilnik za tu grupu i pol poznaje. Kad se godište ili pol
- * promeni, ponuda se prekraja pred očima — disciplina koja u novom uzrastu ne
- * postoji ispada sama, a ne ostane tiho upisana.
+ * Age group is calculated from birth year, and available disciplines
+ * and weight classes are limited to valid options for that competitor.
+ * Changing birth year or gender updates the available choices automatically.
  */
-function editEntryModal({ competition, competitor, entries, isNew = false }) {
+  function editEntryModal({ competition, competitor, entries, isNew = false }) {
   const season = seasonOf(competition);
   const years = Array.from({ length: 101 }, (unused, i) => season - i);
   const picked = new Set(entries.map((e) => e.discipline));
@@ -524,7 +504,7 @@ function editEntryModal({ competition, competitor, entries, isNew = false }) {
   const derived = document.getElementById('e-derived');
   const box = document.getElementById('e-error');
 
-  /** Sve što zavisi od godišta i pola — prekraja se na svaku njihovu izmenu. */
+  /** Update everything that depends on birth year or gender whenever either changes. */
   function paint() {
     const year = Number(form.year.value);
     const sex = form.sex.value;
@@ -534,8 +514,8 @@ function editEntryModal({ competition, competitor, entries, isNew = false }) {
 
     const chosen = new Set([...form.querySelectorAll('[name="disciplines"]:checked')]
       .map((input) => input.value));
-    // Prvo iscrtavanje uzima ono što na prijavi stoji; svako sledeće ono što
-    // je čovek u međuvremenu čekirao.
+    // The first render takes what the entry holds; every later one what
+    // the user has ticked since.
     const keep = chosen.size || form.dataset.painted ? chosen : picked;
 
     document.getElementById('e-disciplines').innerHTML = possible.map((d) => `
@@ -591,7 +571,7 @@ function editEntryModal({ competition, competitor, entries, isNew = false }) {
       if (isNew) {
         const done = await store.addCompetitor(competition.id, patch);
         closeModal();
-        // Poruka se slaže sa polom takmičara — „upisana", ne „upisan".
+    // The message agrees with the competitor's sex — "upisana", not "upisan".
         const ona = patch.sex === 'Ž';
         toast([
           `${ime} — ${ona ? 'upisana' : 'upisan'}, uzrast ${done.group}`,
@@ -641,9 +621,9 @@ function editEntryModal({ competition, competitor, entries, isNew = false }) {
 }
 
 /**
- * Karton takmičara — gde je nastupao i šta je osvojio. Samo prikaz: plasmani
- * se unose na ekranu „Rezultati", da se pregled učinka i upisivanje rezultata
- * ne mešaju na istom mestu.
+ * The competitor's record card — where they competed and what they won.
+ * Display only: placements are entered on the Rezultati screen, so
+ * reviewing and recording do not mix in one place.
  */
 function careerModal({ person, career }) {
   const blank = { zlato: 0, srebro: 0, bronza: 0, ucesce: 0, medalje: 0, bodovi: 0 };
@@ -728,15 +708,12 @@ function careerModal({ person, career }) {
     </div>`;
 }
 
-// ── Klubovi ────────────────────────────────────────────────────────────
+// === Clubs =============================================
 
 /**
- * Evidencija klubova sa učinkom kroz sve sezone. Medalja se pripisuje klubu
- * koji je takmičar tada predstavljao, pa prelazak u drugi klub ne premešta
- * ranije osvojeno.
- *
- * Poređani su po bodovima — to je jedini redosled koji na ovakvoj tabeli išta
- * znači; azbučni red bi sakrio ono zbog čega se tabela i gleda.
+ * The club register with results across all seasons. A medal belongs to
+ * the club the competitor represented that day, so a transfer moves
+ * nothing. Sorted by points — the only order that means anything here.
  */
 function clubsHtml({ clubs }) {
   if (!clubs.length) {
@@ -785,9 +762,9 @@ function clubsHtml({ clubs }) {
 `;
 }
 
-// ── Rezultati ──────────────────────────────────────────────────────────
+// === Results =============================================
 
-/** Šta koje stanje takmičenja znači za korisnika, kad se prebaci. */
+/** What each competition state means for the user, when switching. */
 const STATUS_TOAST = {
   'Prijave otvorene': 'prijave su otvorene',
   'Prijave zatvorene': 'prijave su zatvorene',
@@ -796,16 +773,15 @@ const STATUS_TOAST = {
 };
 
 /**
- * Unos plasmana. Glavno sortiranje je po disciplini, unutar nje po kategoriji —
- * onako kako se i sudi i kako se zovu zvanični rezultati.
+ * Placement entry. Sorted by discipline, then by category — the way it is
+ * judged and the way official results are named.
  *
- * Disciplina je harmonika (`<details>`): zatvorena pokazuje koliko ima
- * kategorija, prijava i koliko je plasmana uneto; otvorena izlista učesnike po
- * kategorijama. Pretraga hvata i disciplinu, i kategoriju, i ime, i klub, pa
- * sama otvara ono što je našla.
+ * A discipline is an accordion (<details>): closed it shows counts, open
+ * it lists entrants by category. Search matches discipline, category,
+ * name and club, and opens what it finds.
  *
- * Zatvoreno takmičenje se ne dira: izbori su onemogućeni dok se ne otvori
- * ponovo, da se zvaničan rezultat ne promeni slučajno.
+ * A closed competition is untouchable: selects are disabled until it is
+ * reopened, so an official result cannot change by accident.
  */
 function resultsHtml({ competition, registry, results }) {
   if (!competition) {
@@ -829,8 +805,8 @@ function resultsHtml({ competition, registry, results }) {
   const locked = competition.status === 'Završeno';
   const byEntry = new Map(results.map((r) => [r.entryId, r]));
 
-  // Disciplina → kategorija → prijave. Redosled disciplina je onaj iz
-  // pravilnika (DISCIPLINES.order), ne azbučni.
+  // Discipline → category → entries. Discipline order comes from the
+  // rulebook (DISCIPLINES.order), not the alphabet.
   const byDiscipline = new Map();
   registry.entries.forEach((e) => {
     if (!byDiscipline.has(e.discipline)) byDiscipline.set(e.discipline, new Map());
@@ -896,8 +872,8 @@ function resultsHtml({ competition, registry, results }) {
       </details>`;
     }).join('');
 
-  // Ekipne kategorije idu istim ekranom, istim menijem i istim brojanjem
-  // mesta: red je ekipa umesto takmičara, plasman je jedan za celu ekipu.
+  // Team categories share the screen, the menu and the slot counting:
+  // the row is a team instead of a competitor, one placement per team.
   const teamsByDisc = new Map();
   registry.teams.forEach((t) => {
     if (!teamsByDisc.has(t.discipline)) teamsByDisc.set(t.discipline, new Map());
@@ -964,8 +940,8 @@ function resultsHtml({ competition, registry, results }) {
   const done = registry.entries.filter((e) => byEntry.has(e.id)).length
     + registry.teams.filter((t) => byEntry.has(t.id)).length;
 
-  // Padajući filteri se pune iz onoga što na takmičenju zaista postoji, pa
-  // nema izbora koji ne daje nijedan red.
+  // The filter menus fill from what actually exists at this competition,
+  // so no choice produces zero rows.
   resultsIndex = buildResultsIndex(registry.entries, registry.teams);
 
   return `
@@ -1012,10 +988,10 @@ function resultsHtml({ competition, registry, results }) {
     <div class="disc-list" id="results-list">${disciplines}${teamSections}</div>`;
 }
 
-/** Ključ ekipne kategorije — sa oznakom, da se nikad ne pomeša sa pojedinačnim. */
+/** Team category key — tagged so it can never mix with individual ones. */
 const teamKeyOf = (team) => `team:${team.discipline}|${team.group}|${team.variant || team.sex}`;
 
-/** Šta uopšte postoji na ovom takmičenju — punjenje padajućih filtera. */
+/** What exists at this competition — feeds the filter menus. */
 let resultsIndex = { disciplines: [], byDiscipline: new Map(), years: [] };
 
 function buildResultsIndex(entries, teams = []) {
@@ -1045,10 +1021,9 @@ function buildResultsIndex(entries, teams = []) {
 }
 
 /**
- * Kategorije za padajući meni. Kad je disciplina izabrana prikazuju se samo
- * njene; inače su grupisane po disciplini, jer se ista kategorija (recimo
- * „Grupa C · pioniri · žene") javlja u više disciplina i bez zaglavlja se ne
- * bi znalo koja je koja.
+ * Categories for the dropdown. With a discipline chosen only its own
+ * show; otherwise they group by discipline, because the same category
+ * name appears in several disciplines.
  */
 function categoryOptions(index, discipline) {
   const head = '<option value="">sve kategorije</option>';
@@ -1062,23 +1037,22 @@ function categoryOptions(index, discipline) {
     </optgroup>`).join('');
 }
 
-/** „68 kg", „+76 kg", ali „apsolutna" ostaje kako jeste — nije telesna težina. */
+/** "68 kg", "+76 kg" — but "apsolutna" stays as is, it is not a weight. */
 const weightLabel = (weight) => {
   if (!weight) return '';
   return /^[+\d]/.test(weight) ? `${weight} kg` : weight;
 };
 
 /**
- * Ime kategorije **bez pola** — to je ono što stoji u padajućem filteru, jer
- * je pol zaseban filter. Prati categoryKey u ostalom: kumite razdvaja telesna težina,
- * kate nivo pojasa, ostalo grupa.
+ * Category name without the sex — that is what the filter shows, since
+ * sex is its own filter. Follows categoryKey otherwise: kumite splits by
+ * weight, kata by level, the rest by group.
  */
 function categoryLabel(entry) {
   const age = ageByCode(entry.group);
   const parts = [`Grupa ${entry.group}`, age ? age.name.toLowerCase() : null];
-  // Po čemu se kategorija deli govori pravilnik, ne ime discipline:
-  // tradicionalni kumite je apsolutan pa mu se telesna težina i ne piše, a sportski
-  // se deli po telesnoj težini iako se zove isto.
+  // What splits a category comes from the rulebook, not the discipline
+  // name: traditional kumite is open, sport kumite splits by weight.
   const drawBy = disciplineByName(entry.discipline)?.drawBy;
   if (drawBy === 'weight') parts.push(weightLabel(entry.weight) || 'bez telesne težine');
   else if (drawBy === 'level') parts.push(entry.level || 'bez nivoa');
@@ -1087,19 +1061,20 @@ function categoryLabel(entry) {
 
 const sexLabel = (sex) => (sex === 'M' ? 'muškarci' : 'žene');
 
-/** Puno ime kategorije, sa polom — za zaglavlje na ekranu i za štampu. */
+/** Full category name, with sex — for headings and print. */
 function categoryFullLabel(entry) {
   const parts = categoryLabel(entry).split(' · ');
   parts.splice(2, 0, sexLabel(entry.sex));
   return parts.join(' · ');
 }
 
-/** Svi plasmani — meni pre nego što se zna šta je u kategoriji zauzeto. */
+/** All placements — the menu before category slots are known. */
 const ALL_PLACEMENTS = new Set(PLACEMENTS.map((pl) => pl.key));
 
 /**
- * Meni plasmana za jedan red: prazno, pa ono što je u kategoriji još slobodno.
- * Sopstveni plasman uvek ostaje u meniju, da se izbor može promeniti ili povući.
+ * The placement menu for one row: empty, then what is still free in the
+ * category. A row's own placement always stays, so it can be changed or
+ * withdrawn.
  */
 const placementOptions = (selected, allowed) => ['<option value="">— nije uneto —</option>']
   .concat(PLACEMENTS.filter((pl) => allowed.has(pl.key) || pl.key === selected).map((pl) => `
@@ -1108,14 +1083,10 @@ const placementOptions = (selected, allowed) => ['<option value="">— nije unet
   .join('');
 
 /**
- * Popunjenost mesta u jednoj kategoriji: prebroji, ispiše i **zaključa**.
- *
- * Po pravilniku kategorija ima jedno prvo, jedno drugo i dva treća mesta. Kada
- * se mesto popuni, ono se u ostalim redovima te kategorije više ne nudi — treće
- * zlato ne treba prijaviti kao grešku posle unosa, nego ga ne pustiti unutra.
- *
- * Discipline koje se mere ili boduju umesto da se izvlače (kihon u mestu,
- * tamashiwari) nemaju ograničenje, pa im se ni brojač ne ispisuje kao razlomak.
+ * Slot usage in one category: count, display and lock. A category has one
+ * first, one second and two thirds; a taken place stops being offered in
+ * the other rows — a third gold is not an error to report, it is a choice
+ * not offered. Scored/measured disciplines have no limit and no fraction.
  */
 function updateCategoryState(cat) {
   const discipline = cat.dataset.disc;
@@ -1132,9 +1103,9 @@ function updateCategoryState(cat) {
     return `<span class="${used > slots ? 'is-over' : used === slots ? 'is-full' : ''}">${pl.short} ${used}/${slots}</span>`;
   });
 
-  // Mesto koje su zauzeli drugi redovi **nestaje iz menija** ovog reda — ne
-  // stoji zatamnjeno nego ga nema. Sopstveni izbor se ne računa, pa se plasman
-  // uvek može promeniti ili povući.
+  // A place taken by other rows disappears from this row's menu — not
+  // greyed out, simply gone. A row's own pick is not counted, so it can
+  // always be changed or withdrawn.
   picks.forEach((pick) => {
     const allowed = new Set(PLACEMENTS.filter((pl) => {
       const slots = placementSlots(discipline, pl.key);
@@ -1142,8 +1113,8 @@ function updateCategoryState(cat) {
       return (counts[pl.key] || 0) - (pick.value === pl.key ? 1 : 0) < slots;
     }).map((pl) => pl.key));
 
-    // Meni se prepisuje samo kad se zaista promenio — inače bi svaki upis
-    // izgradio sve menije u kategoriji iznova.
+    // The menu is rewritten only when it actually changed — otherwise
+    // every entry would rebuild every menu in the category.
     const want = ['', ...PLACEMENTS.map((pl) => pl.key)
       .filter((k) => allowed.has(k) || k === pick.value)].join('|');
     if (want !== [...pick.options].map((o) => o.value).join('|')) {
@@ -1158,7 +1129,7 @@ function updateCategoryState(cat) {
   cat.classList.toggle('is-over', over);
 }
 
-/** Brojači unetih plasmana — po disciplini i ukupno, bez ponovnog iscrtavanja. */
+/** Placement counters — per discipline and total, with no re-render. */
 function updateResultsProgress() {
   document.querySelectorAll('.cat').forEach(updateCategoryState);
 
@@ -1175,8 +1146,8 @@ function updateResultsProgress() {
 
   const total = document.getElementById('results-progress');
   if (total) {
-    // Kroz filter se broji samo ono što je na ekranu, da brojač ne priča o
-    // redovima koje korisnik trenutno ne vidi.
+    // With a filter on, only what is on screen is counted, so the
+    // counter does not talk about rows the user cannot see.
     const filtered = !!document.querySelector('.result-row[hidden]');
     const picks = [...document.querySelectorAll('.result-row:not([hidden]) .result-pick')];
     const done = picks.filter((p) => p.value).length;
@@ -1185,12 +1156,9 @@ function updateResultsProgress() {
 }
 
 /**
- * Filtriranje po disciplini, kategoriji i godištu. Skriva redove umesto da
- * ponovo iscrtava spisak — izbori plasmana koje je korisnik već otvorio ne
- * smeju da se izgube pod rukom.
- *
- * Kad je bilo šta filtrirano, discipline se same otvaraju; kad se filteri
- * ponište, vraćaju se u zatvoreno stanje.
+ * Filtering by discipline, category and year. Hides rows instead of
+ * re-rendering — open placement menus must not vanish mid-use. Filtered
+ * disciplines open themselves; clearing the filters closes them again.
  */
 function applyResultsFilter() {
   const disc = document.getElementById('f-disc')?.value || '';
@@ -1235,38 +1203,34 @@ function applyResultsFilter() {
   }
 }
 
-/** Kategorije se sužavaju na izabranu disciplinu, pa se filter primeni. */
+/** Categories narrow to the picked discipline, then the filter applies. */
 function onDisciplineFilterChange() {
   const disc = document.getElementById('f-disc').value;
   const catSelect = document.getElementById('f-cat');
   const previous = catSelect.value;
   catSelect.innerHTML = categoryOptions(resultsIndex, disc);
-  // Ako izabrana kategorija postoji i u novoj listi, zadrži je.
+  // If the chosen category also exists in the new list, keep it.
   catSelect.value = [...catSelect.options].some((o) => o.value === previous) ? previous : '';
   applyResultsFilter();
 }
 
 
-// ── Podešavanja ────────────────────────────────────────────────────────
+// === Settings =============================================
 
 /**
- * Cenovnik kotizacija.
+ * The fee price list — the only part of the rulebook edited from the app
+ * so far; the rest still lives in data.js.
  *
- * Jedini deo pravilnika koji se za sada menja iz aplikacije — ostalo (uzrasne
- * grupe, discipline, telesne težine) i dalje stoji u data.js, jer se menja
- * jednom u nekoliko godina i menja ga onaj ko dira kod.
- *
- * Kotizacija se plaća **po prijavi**: ko je prijavljen u tri discipline plaća
- * tri. Ekipa se plaća kao celina, enbu po svojoj ceni. Starijim uzrastima se
- * prve tri discipline opraštaju — osim onih koje su ovde označene kao one
- * koje se plaćaju uvek.
+ * Fees are paid per entry: three disciplines, three fees. A team pays as
+ * a whole, enbu at its own price. Older groups get their first three
+ * disciplines free — except the ones marked always paid.
  */
-/** MB ispod gigabajta, cele GB iznad — zauzeće baze je informacija, ne merenje. */
+/** MB below a gigabyte, whole GB above — information, not measurement. */
 const storageSize = (bytes) => bytes >= 1073741824
   ? `${num(Math.round(bytes / 1073741824))} GB`
   : `${num(Math.max(1, Math.round(bytes / 1048576)))} MB`;
 
-/** Stanje trajnog skladišta za Podešavanja — traži se pri svakom pokretanju. */
+/** Persistent-storage state for Podešavanja — requested on every launch. */
 function storageHtml(storage) {
   if (!storage.supported) {
     return `
@@ -1366,33 +1330,31 @@ function settingsHtml({ fees, storage }) {
     </div>`;
 }
 
-// ── Diplome ────────────────────────────────────────────────────────────
+// === Diplomas =============================================
 
 /**
- * Diplome se štampaju unapred, u tiražu, sa gotovim tekstom i praznim
- * linijama. Posle takmičenja u te linije treba upisati ko je šta osvojio —
- * i to onim redom kojim se kategorije završavaju, jer se dodeljuju odmah.
- *
- * Zato ovaj ekran ne pravi diplomu nego **upis na nju**: gde na listu stoji
- * ime, gde klub, gde mesto i disciplina. Papir je tuđi i zadat, pa se ovde
- * ne bira izgled nego mera.
+ * Diplomas are printed in advance with blank lines; after the
+ * competition the lines are filled in, category by category as they
+ * finish. This screen makes the writing, not the diploma: where the
+ * name goes, the club, the place and discipline. The paper is given, so
+ * what is set here is measurement, not looks.
  */
 
-/** Mera lista u milimetrima — po njoj se računa i lenjir i širina upisa. */
+/** Sheet size in millimetres — drives the ruler and the line widths. */
 const slipSize = (setup) => (setup.orientation === 'landscape'
   ? { width: 297, height: 210 } : { width: 210, height: 297 });
 
-/** Podrazumevani sadržaj svakog reda upisa. */
+/** Default content of each written line. */
 const diplomaText = {
   ime: ({ entry }) => entry.name,
   klub: ({ entry }) => entry.club,
   mesto: ({ placement }) => placement.place || placement.label,
   disciplina: ({ entry }) => entry.discipline,
-  // Ekipna diploma nosi kategoriju ekipe; imena članova se ne pišu nigde.
+  // A team diploma carries the team's category; member names go nowhere.
   kategorija: ({ entry }) => entry.teamCategory || categoryFullLabel(entry),
 };
 
-/** Isto to, sa izmišljenim podacima — za probni list. */
+/** The same, with made-up data — for the test sheet. */
 const DIPLOMA_SAMPLE = {
   entry: {
     name: 'Petar Petrović', club: 'KK Fudokan Beograd', discipline: 'Kate',
@@ -1402,11 +1364,9 @@ const DIPLOMA_SAMPLE = {
 };
 
 /**
- * Ko dobija diplomu: **samo osvajači medalja**, po kategorijama, redom kojim
- * se i dodeljuju — zlato, srebro, pa dve bronze.
- *
- * Kategorija bez ijedne medalje se ne prikazuje: dok plasman nije unet, nema
- * se šta ni odštampati.
+ * Who gets a diploma: medallists only, by category, in award order —
+ * gold, silver, two bronzes. A category with no medal yet is not shown:
+ * nothing to print.
  */
 function diplomaCategories({ registry, results }) {
   const byEntry = new Map(results.map((r) => [r.entryId, r]));
@@ -1420,8 +1380,8 @@ function diplomaCategories({ registry, results }) {
     cats.get(key).winners.push({ entry, placement });
   });
 
-  // Ekipna diploma: na mestu imena stoji naziv tima (klub, sa rimskim brojem
-  // kad ih klub ima više u kategoriji) — imena članova se ne pišu.
+  // A team diploma: the team's name (club, with a roman numeral when the
+  // club has several in the category) where the name goes — no members.
   registry.teams.forEach((team) => {
     const placement = placementByKey(byEntry.get(team.id)?.placement || '');
     if (!placement?.medal) return;
@@ -1447,7 +1407,7 @@ function diplomaCategories({ registry, results }) {
     || labelOf(a.first).localeCompare(labelOf(b.first), 'sr'));
 }
 
-/** Jedno polje podešavanja — milimetri i tačke, ništa drugo se ne upisuje. */
+/** One setup field — millimetres and points, nothing else. */
 const diplomaField = (key, field, label, value, step = 1) => `
       <label class="dip-field">
         <span class="filter-label">${esc(label)}</span>
@@ -1470,8 +1430,8 @@ function diplomasHtml({ competition, cats, setup }) {
 
   const ukupno = cats.reduce((sum, cat) => sum + cat.winners.length, 0);
 
-  // Mere se podese jednom, pa se godinama samo štampa — zato je okvir otvoren
-  // dok nije izmereno, a posle sklopljen, na jedan klik.
+  // Measures are set once and then only printed for years — so the box
+  // is open until measured, and folded afterwards.
   const setupHtml = `
     <details class="dip-setup"${setup.savedAt ? '' : ' open'}>
       <summary class="dip-setup-head">
@@ -1548,8 +1508,9 @@ function diplomasHtml({ competition, cats, setup }) {
 }
 
 /**
- * Redovi upisa za jednog osvajača, po izmerenim merama. Isključen red se ne
- * štampa — na diplomi na kojoj disciplina već piše, ne treba je pisati opet.
+ * Written lines for one winner, at the measured positions. A disabled
+ * line is not printed — a diploma that already says the discipline does
+ * not need it twice.
  */
 const diplomaLines = (winner, setup) => DIPLOMA_LINES
   .filter((line) => setup.lines[line.key].on)
@@ -1560,7 +1521,7 @@ const diplomaLines = (winner, setup) => DIPLOMA_LINES
     });
   });
 
-/** Po jedan list na svakog osvajača, bez ičega osim upisa. */
+/** One sheet per winner, nothing on it but the writing. */
 function diplomaSpec({ competition, winners, setup, title }) {
   if (!winners.length) return null;
   return {
@@ -1580,12 +1541,10 @@ function diplomaSpec({ competition, winners, setup, title }) {
 }
 
 /**
- * Probni list: lenjir, izmišljen upis na izmerenim mestima i uputstvo.
- *
- * Štampa se na običan papir i prisloni uz diplomu prema svetlu — sa lenjira
- * se pročita koliko je milimetara do svake linije i to se upiše u polja.
- * Uputstvo stoji na papiru, a ne na ekranu, jer ga čita onaj ko taj papir
- * drži u ruci.
+ * The test sheet: a ruler, a made-up writing at the measured spots, and
+ * instructions. Printed on plain paper and held against the diploma to
+ * the light; what the ruler shows goes into the fields. The instructions
+ * are on the paper because that is what the person is holding.
  */
 function diplomaTestSpec({ competition, setup }) {
   const size = slipSize(setup);
@@ -1613,39 +1572,37 @@ function diplomaTestSpec({ competition, setup }) {
   };
 }
 
-// ── Rang lista ─────────────────────────────────────────────────────────
+// === Rankings =============================================
 
 /**
- * Rang liste jedne sezone. Klubovi su jedna lista, pa po jedna za svaku
- * uzrasnu grupu podeljenu na muškarce i žene — onako kako se i dodeljuju
- * pehari, i onako kako se štampaju: **svaka kategorija je zaseban list**.
- *
- * Sezona nije zakucana. Otvorena traje dok je urednik ne zatvori, a
- * zatvaranje upisuje datume koje on potvrdi.
+ * One season's rankings. Clubs are one list, then one per age group split
+ * by sex — the way cups are awarded and the way they print: every
+ * category its own sheet. A season is not hard-coded: the open one lasts
+ * until the editor closes it.
  */
 
-/** Koja je lista trenutno izabrana na ekranu — `klubovi` ili npr. `C-Ž`. */
+/** Which list is currently picked — `klubovi` or e.g. `C-Ž`. */
 let rankPick = 'klubovi';
 
-/** Koja je sezona izabrana; prazno znači otvorena. */
+/** Which season is picked; empty means the open one. */
 let seasonPick = 'open';
 
-/** Šta radi dugme „Završetak sezone" na trenutnom ekranu. */
+/** What the "Završetak sezone" button does on the current screen. */
 let closeSeasonAction = null;
 
-/** Plan borilišta dok je taj ekran otvoren — izmene se upisuju odmah. */
+/** The mat plan while that screen is open — changes save immediately. */
 let tatamiState = null;
 
-/** Kategorije za žreb dok je taj ekran otvoren. */
+/** Draw categories while that screen is open. */
 let drawState = null;
 
-/** Osvajači i mere upisa dok je otvoren ekran Diplome. */
+/** Winners and measures while the Diplome screen is open. */
 let diplomaState = null;
 
-/** Prijave dok je otvoren spisak takmičara — odatle ih uzima ispravka. */
+/** Entries while the competitor list is open — corrections read from here. */
 let competitorsState = null;
 
-/** Cenovnik dok su otvorena Podešavanja; upisuje se čim se polje napusti. */
+/** The price list while Podešavanja is open; saved on field blur. */
 let feesState = null;
 
 async function updateFees(mutate) {
@@ -1655,10 +1612,9 @@ async function updateFees(mutate) {
 }
 
 /**
- * Mera se upiše čim se polje napusti, bez „sačuvaj" — kao i raspored po
- * borilištima. Ekran se pri tome **ne iscrtava ponovo**: jedino što od mera
- * zavisi su sama polja, a ponovno iscrtavanje bi odnelo fokus usred
- * podešavanja.
+ * A measure saves as soon as the field is left, no save button — like the
+ * mat schedule. The screen is not re-rendered: only the fields depend on
+ * the measures, and a re-render would steal focus mid-setup.
  */
 async function updateDiploma(mutate) {
   if (!diplomaState) return;
@@ -1666,7 +1622,7 @@ async function updateDiploma(mutate) {
   await store.saveDiplomaSetup(diplomaState.setup);
 }
 
-/** U koje takmičenje ide uvoz; prazno znači aktuelno. */
+/** Which competition the import goes into; empty means the active one. */
 let importPick = '';
 
 const MEDAL_COLUMNS = ['zlato', 'srebro', 'bronza', 'ucesce'];
@@ -1676,10 +1632,9 @@ const seasonSpan = (season) => (season.to
   : `od ${dateLabel(season.from)} · u toku`);
 
 function rankingsHtml({ seasons, season, data }) {
-  // Birač sezona se iscrtava **uvek**, i kad u sezoni nema ničega. Tek
-  // zatvorena sezona ostavlja iza sebe praznu novu; da birač nestane sa
-  // njom, urednik ne bi imao odakle da se vrati na ono što je upravo
-  // zatvorio — ni da to ponovo otvori.
+  // The season picker renders always, even over an empty season. A just-
+  // closed season leaves an empty new one behind; without the picker the
+  // editor could not get back to what they just closed — or reopen it.
   const seasonPicker = `
     <div class="filters">
       <label class="filter">
@@ -1698,9 +1653,8 @@ function rankingsHtml({ seasons, season, data }) {
     pomera i nju — <button type="button" class="link-cell" data-reopen="${esc(season.id)}">otvori
     ponovo</button> ako treba.</div>`;
 
-  // Bodovi se knjiže zatvaranjem takmičenja. Takmičenje koje je odigrano a
-  // nije zatvoreno zato tiho nedostaje na rang listi — i to mora da piše,
-  // jer se sa same liste ne vidi da nešto čeka.
+  // Points are booked when a competition closes. One played but not
+  // closed is silently missing from the rankings — so it must say so.
   const pendingNotice = data.pending?.length ? `<div class="notice">
     ${data.pending.length === 1 ? 'Jedno takmičenje u ovoj sezoni nije zatvoreno'
     : `${data.pending.length} takmičenja u ovoj sezoni nisu zatvorena`} — bodovi sa
@@ -1801,8 +1755,8 @@ function rankingsHtml({ seasons, season, data }) {
 }
 
 /**
- * Modal za završetak sezone. Ime i oba datuma su polja, ne tekst — urednik
- * određuje kad sezona počinje i kad se završava, aplikacija samo predlaže.
+ * The season-closing modal. Name and both dates are fields, not text —
+ * the editor decides when a season starts and ends, the app suggests.
  */
 function closeSeasonModal({ season, data }) {
   const today = new Date().toISOString().slice(0, 10);
@@ -1856,8 +1810,8 @@ function closeSeasonModal({ season, data }) {
       return;
     }
 
-    // Štampa ide nad tačno onim rasponom koji je urednik potvrdio, a ne nad
-    // onim što je bilo na ekranu — datum je mogao da se promeni ovde.
+    // The print covers exactly the range the editor confirmed, not what
+    // was on screen — the date may have changed here.
     const finalSeason = { ...season, name, from, to };
     const finalData = await store.rankings(finalSeason);
     const done = printStack(seasonStack({ season: finalSeason, data: finalData }));
@@ -1876,21 +1830,21 @@ function closeSeasonModal({ season, data }) {
   });
 }
 
-// ── Žreb ───────────────────────────────────────────────────────────────
+// === Draw =============================================
 
 /*
- * Žreb po kategorijama. Ekran je spisak: disciplina, pod njom kategorije sa
- * brojem prijavljenih, i uz svaku dugme koje **odmah izvuče novu granu i
- * pošalje je na štampu**. Ništa se ne čuva — svaki pritisak je nov žreb, jer
- * je žreb koji se pamti između dva pritiska gori od nikakvog: niko ne bi
- * znao da li gleda onaj koji je izvučen pred sudijama ili neki raniji.
+ * The draw, by category. The screen is a list: discipline, its categories
+ * with entry counts, and next to each a button that draws a fresh bracket
+ * and sends it straight to print. Nothing is stored — every press is a
+ * new draw, because a remembered draw is worse than none: nobody would
+ * know if they are looking at the one drawn before the judges.
  *
- * Papir su dve strane (ili više): prva je grana sa mestom za upis osvojenih
- * mesta i potpisom glavnog sudije, ostale su spisak takmičara te kategorije
- * — samo ime, prezime i klub, jer se na tatamiju proziva, ne boduje.
+ * The paper is two pages or more: the bracket with places to write the
+ * results and the head referee's signature, then the category's list of
+ * competitors — names and clubs only, for calling out at the mat.
  */
 
-/** Kategorije jednog takmičenja, grupisane po disciplini, sa prijavama. */
+/** One competition's categories, grouped by discipline, with entries. */
 function drawIndex(registry) {
   const byDiscipline = new Map();
   const catsOf = (discipline) => {
@@ -1907,9 +1861,9 @@ function drawIndex(registry) {
     cats.get(key).entries.push(e);
   });
 
-  // Ekipne discipline nemaju pojedinačne prijave, ali imaju takmičare —
-  // učesnik je ekipa. Za granu je razlika samo u tome ko stoji u kutiji, pa
-  // se ekipne kategorije slažu uz pojedinačne, ne pored njih.
+  // Team disciplines have no individual entries, but they do have
+  // competitors — the team. For the bracket the only difference is who
+  // stands in the box, so team categories slot in with the individual.
   registry.teams.forEach((t) => {
     const cats = catsOf(t.discipline);
     const key = `${t.discipline}|${t.group}|${t.variant || t.sex}`;
@@ -1955,11 +1909,9 @@ function drawHtml({ competition, index }) {
 
   const total = index.reduce((a, d) => a + d.categories.length, 0);
 
-  // Disciplina iz pravilnika koja na ovom takmičenju nema nijednu kategoriju
-  // ne pojavi se u spisku — i to je do sad ćutalo. Prijave se upisuju pri
-  // pravljenju takmičenja; ono napravljeno pre nego što je disciplina uvedena
-  // nema njene prijave i nikad ih neće ni dobiti samo od sebe. Zato se
-  // izostanak sad **imenuje**, umesto da se traži po ekranu.
+  // A rulebook discipline with no category at this competition does not
+  // appear in the list — and that used to stay silent. The absence is now
+  // named instead of hunted for on the screen.
   const missing = DISCIPLINES
     .filter((d) => !index.some((x) => x.discipline === d.name))
     .map((d) => d.name);
@@ -1994,9 +1946,9 @@ function drawHtml({ competition, index }) {
           const parts = n > MAX_BRACKET
             ? `${n} ${unit} · dve grane + završna`
             : `${n} ${unit} · grana od ${bracketOf(n)}`;
-          // U pretragu ulaze i reči kojima se ovo traži, a ne stoje u imenu:
-          // „ekipno", „ekipa", „tim", „par". Ko kuca „ekipno" traži ekipne
-          // kategorije, i treba da ih nađe iako se nijedna tako ne zove.
+          // The search also matches words people type that are not in
+          // the name: "ekipno", "ekipa", "tim", "par" — whoever types
+          // "ekipno" wants team categories found.
           const words = [d.discipline, c.label,
             c.isTeam ? 'ekipno ekipa ekipe tim timovi par parovi' : 'pojedinačno pojedinac']
             .join(' ').toLowerCase();
@@ -2027,39 +1979,35 @@ function drawHtml({ competition, index }) {
 /** Prva stepenica dvojke koja primi toliko prijavljenih. */
 const bracketOf = (n) => Math.max(2, 2 ** Math.ceil(Math.log2(Math.max(n, 2))));
 
-// ── Uvoz prijava iz Excela ─────────────────────────────────────────────
+// === Entry import =============================================
 
 /*
- * Prijave ne unosi savez nego klubovi, i to **van aplikacije**: savez im
- * pošalje `form/FSS-Entry-Form.xlsx`, treneri ga popune u Excelu i vrate.
- * Aplikaciji ostaje jedan posao — da tuđi fajl pročita, pokaže šta nosi i
- * upiše ga u izabrano takmičenje.
+ * Entries are made by clubs, outside the app: the federation sends
+ * form/FSS-Entry-Form.xlsx, coaches fill it in Excel and send it back.
+ * The app's one job is to read the file, show what it carries and write
+ * it into the chosen competition.
  *
- * Zato ovaj ekran pokazuje **svaki red iz fajla**, i onaj koji ne valja.
- * Uvozi se ono što je ispravno, a uz svaki odbačen red stoji broj reda iz
- * Excela i rečenica šta mu fali — savez to prepiše klubu i klub zna šta da
- * popravi. Fajl koji se odbije u celini ne kaže ništa nikome.
+ * The screen therefore shows every row from the file, including bad
+ * ones. Valid rows import; every rejected row carries its Excel row
+ * number and a sentence saying what is missing — the federation relays
+ * that to the club. A file rejected whole tells nobody anything.
  */
 
 /**
- * Fajlovi koji su trenutno otvoreni na ekranu Uvoz — pročitani, još ne uvezeni.
- *
- * Klubova ima trinaest i svaki šalje svoj fajl, pa se biraju **svi odjednom**:
- * `files` su izabrani fajlovi, `read` je ono što je iz svakog pročitano, u
- * istom redosledu. Svaki fajl ostaje svoj i posle uvoza — greška se prijavljuje
- * klubu, a klub se prepoznaje po fajlu iz kog je red došao.
+ * Files currently open on the Uvoz screen — read, not yet imported.
+ * Every club sends its own file, so all are picked at once: `files` are
+ * the picked files, `read` what was read from each, same order. Each
+ * file stays its own, so an error is reported per club.
  */
 let importState = { files: [], read: [], done: null };
 
 const resetImport = () => { importState = { files: [], read: [], done: null }; };
 
 /**
- * Čita izabrane fajlove za izabrano takmičenje.
- *
- * Uzrasna grupa zavisi od **sezone takmičenja**, a ne od današnjeg datuma —
- * tabela saveza se svake godine pomeri za jednu. Zato se fajlovi čitaju iznova
- * kad se promeni takmičenje u koje se uvozi: isto godište ume da bude pionir na
- * jednom, a stariji pionir na drugom.
+ * Reads the picked files for the picked competition. Age group depends on
+ * the competition's season, not today's date — so files are re-read when
+ * the target competition changes: the same birth year can be a pionir at
+ * one and a stariji pionir at another.
  */
 async function readImportFiles(competition) {
   const season = seasonOf(competition);
@@ -2078,7 +2026,7 @@ async function readImportFiles(competition) {
   importState.done = null;
 }
 
-/** Šta svi izabrani fajlovi zajedno nose. */
+/** What all the picked files carry together. */
 function importTotals() {
   const dobri = importState.read.filter((r) => r.payload);
   return {
@@ -2095,7 +2043,7 @@ function importHtml({ competitions, activeId }) {
   const s = importState;
   const target = competitions.find((c) => c.id === (importPick || activeId)) || competitions[0];
   const zbir = importTotals();
-  // Zatvorene prijave znače zatvoreno za sve — i za ispravku i za uvoz.
+  // Closed entries mean closed for everything — corrections and import.
   const open = !target || entriesOpen(target);
   const ready = !!target && open && zbir.entries + zbir.teams > 0;
   const koliko = `${zbir.entries} ${plural(zbir.entries, 'prijavu', 'prijave', 'prijava')}`
@@ -2198,8 +2146,9 @@ function importFilesCard(zbir, target) {
 }
 
 /**
- * Jedan fajl, razložen. Otvoren je sam od sebe kad u njemu ima reda koji ne
- * ulazi — to je jedino zbog čega urednik ovde i gleda; ostalo stoji sklopljeno.
+ * One file, broken down. Opens itself when it contains a row that will
+ * not import — the only reason the editor looks here; the rest stays
+ * folded.
  */
 function importFileBlock(r, target) {
   if (!r.payload) return '';
@@ -2223,8 +2172,9 @@ function importFileBlock(r, target) {
 }
 
 /**
- * Svaki red iz fajla, i ispravan i neispravan. Neispravan nosi broj reda iz
- * Excela i rečenicu šta mu fali — to je ono što savez prepiše klubu.
+ * Every row from the file, valid or not. An invalid one carries its Excel
+ * row number and a sentence about what is missing — that is what gets
+ * relayed to the club.
  */
 function importRows(rows, kind) {
   const columns = kind === 'solo'
@@ -2267,21 +2217,18 @@ function importRows(rows, kind) {
     </table>`;
 }
 
-// ── Kalendar ───────────────────────────────────────────────────────────
+// === Calendar =============================================
 
 /*
- * Kalendar sezone — spisak, ne tabela sa kvadratićima. Ono što urednik
- * traži od kalendara je „šta imamo u martu", a to je red teksta, ne mreža.
- *
- * Svaka takmičarska godina ima **A i B kalendar**. A lista ulazi u
- * bodovanje, B ne. To su dva spiska nad istim takmičenjima, pa se ovde i
- * prikazuju kao dva bloka — ne kao filter koji sakriva pola godine.
- *
- * Takmičenje upisano ovde je isto ono takmičenje koje stoji u evidenciji:
- * jedan zapis, dva pogleda. Zato se ništa ne prepisuje ni ne sinhronizuje.
+ * The season calendar — a list, not a grid of squares. What the editor
+ * asks a calendar is "what do we have in March", and that is a line of
+ * text. Every competition year has an A and a B calendar — two lists over
+ * the same competitions, shown as two blocks, not as a filter hiding half
+ * the year. A competition entered here is the same record as in the
+ * register: one record, two views.
  */
 
-/** Takmičenja jedne sezone, grupisana po mesecu, najstarije napred. */
+/** One season's competitions, grouped by month, oldest first. */
 function byMonth(competitions) {
   const months = new Map();
   competitions
@@ -2369,22 +2316,17 @@ function calendarHtml({ seasons, season, competitions, counts }) {
     <div class="cal-body">${blocks}</div>`;
 }
 
-// ── Borilišta ──────────────────────────────────────────────────────────
+// === Mats =============================================
 
 /*
- * Raspored takmičara na borilištima — onaj isti list koji savez i danas
- * pravi rukom u Wordu, samo što se ovde ne kuca nego se sastavlja iz
- * prijava koje već postoje.
+ * The mat schedule — the same sheet the federation used to make by hand
+ * in Word, assembled here from the entries that already exist.
  *
- * Jedinica rasporeda je **blok**: jedna uzrasna grupa jednog pola, sa
- * spiskom disciplina koje se za nju rade. To je jedinica u prilogu koji je
- * Filip poslao („ГРУПА А (ДЕЧАЦИ) — кате појединачно — кате екипно…"), i
- * to je jedinica po kojoj se sudi.
- *
- * Blokovi se **izvode iz prijava**, ne unose. Grupa koja nema nijednu
- * prijavu nema ni blok; disciplina koja se ne pojavljuje ni na jednoj
- * prijavi te grupe ne stoji u spisku. Raspored tako ne ume da izmisli
- * kategoriju koja neće izaći na tatami.
+ * The unit is a block: one age group of one sex, with the disciplines it
+ * runs — the unit the official attachment uses, and the unit by which it
+ * is judged. Blocks are derived from entries, never entered: a group with
+ * no entries has no block, so the schedule cannot invent a category that
+ * will not step on a mat.
  */
 
 const SEX_WORD = {
@@ -2392,24 +2334,20 @@ const SEX_WORD = {
   'Ž': { A: 'devojčice', B: 'devojčice', C: 'devojčice', D: 'devojčice', E: 'devojčice' },
 };
 
-/** „dečaci" za mlađe uzraste, „muškarci" za starije — kako savez i piše. */
+/** "dečaci" for younger groups, "muškarci" for older — as the federation writes. */
 const blockSexWord = (sex, code) =>
   SEX_WORD[sex]?.[code] || (sex === 'M' ? 'muškarci' : 'žene');
 
 /**
- * Svi blokovi ovog takmičenja, redom iz pravilnika (uzrast, pa muški/ženski).
- * Discipline u bloku idu redosledom iz `DISCIPLINES`, ne azbučnim — tako se
- * i sudi i tako stoji u prilogu.
+ * All blocks of this competition, in rulebook order (age, then M/Ž).
+ * Disciplines inside a block follow DISCIPLINES order, not the alphabet.
  */
 /**
- * Jedan red rasporeda je **jedna disciplina jedne uzrasne grupe** — tačno ono
- * što se odigra na jednom borilištu u jednom terminu.
- *
- * Ranije je jedinica bila cela uzrasna grupa, pa su sve njene discipline morale
- * na isto borilište. Sada se par (grupa, disciplina) raspoređuje sam, a ekran
- * ih samo grupiše — po uzrastu ili po disciplini, kako je organizatoru
- * potrebno. Otuda „sportski kumite svih uzrasta na jedno borilište, ostalo na
- * drugo" jeste nekoliko klikova, a ne nemoguć zahtev.
+ * One schedule row is one discipline of one age group — exactly what is
+ * played on one mat in one slot. The unit used to be a whole age group,
+ * which forced all its disciplines onto one mat; now each (group,
+ * discipline) pair is placed on its own, and the screen only groups them
+ * — so "sport kumite of all ages on one mat" is a few clicks.
  */
 function tatamiPairs(registry) {
   const map = new Map();
@@ -2459,8 +2397,8 @@ const TATAMI_AXES = {
 const axisOf = (plan) => TATAMI_AXES[plan.axis] || TATAMI_AXES.uzrast;
 
 /**
- * Raspored pre uvođenja parova čuvao je borilište po uzrasnoj grupi. Prevodi se
- * jednom, pri prvom otvaranju: ono što je bilo raspoređeno ostaje raspoređeno.
+ * Plans made before pairs existed stored a mat per age group. Translated
+ * once, on first open: what was placed stays placed.
  */
 function migrateTatamiPlan(plan, pairs) {
   if (!plan.blocks || plan.migrated) return false;
@@ -2476,11 +2414,9 @@ function migrateTatamiPlan(plan, pairs) {
 }
 
 /**
- * Kartice po borilištima i one neraspoređene.
- *
- * Kartica se crta **na svakom borilištu na kom ima svoje parove**: uzrasna
- * grupa čije dve discipline idu na različita borilišta pojaviće se na oba, sa
- * onim što se tu zaista radi. Isto piše i na papiru.
+ * Cards per mat, plus the unplaced ones. A card is drawn on every mat
+ * that has its pairs: a group whose two disciplines go to different mats
+ * appears on both, with what actually happens there. Paper says the same.
  */
 function tatamiCards(pairs, plan) {
   const axis = axisOf(plan);
@@ -2520,7 +2456,7 @@ function tatamiCards(pairs, plan) {
   return { columns: cols, pool: finish(pool).sort((a, b) => a.rank - b.rank) };
 }
 
-/** „(M/Ž)" — koji polovi izlaze na to borilište, za zaglavlje kolone. */
+/** "(M/Ž)" — which sexes appear on that mat, for the column header. */
 const matSexLabel = (list) => {
   const sexes = [...new Set(list.flatMap((card) => card.pairs.map((p) => p.sex)))];
   if (!sexes.length) return '';
@@ -2620,40 +2556,35 @@ function tatamiHtml({ competition, pairs, plan }) {
 `;
 }
 
-// ── Štampa lista ───────────────────────────────────────────────────────
+// === List printing =============================================
 
 /*
- * Jedan spec po ekranu. Pravilo je isto za sve četiri: na papir ide ono
- * što je na ekranu. Filter koji sakrije red sa ekrana skida ga i sa
- * papira, a koji je filter bio uključen piše u zaglavlju lista — spisak
- * koji ćuti o tome šta je izostavio je gori nego nikakav.
- *
- * Ni jedan od ovih listova se ne potpisuje. To su radne liste; potpisuju
- * se zvanična dokumenta iz documents.html, gde stoje mesta za glavnog
- * sudiju i delegata.
+ * One spec per screen, one rule for all: what is on screen goes on
+ * paper. A filter that hides a row drops it from the print, and the
+ * active filter is named in the header. None of these sheets are signed
+ * — they are working lists; official documents live in documents.html.
  */
 
-/** Desni blok zaglavlja: koje takmičenje. */
+/** The right header block: which competition. */
 const competitionContext = (c) => (c
   ? { name: c.name, sub: `${dateLabel(c.date)} · ${c.place}` }
   : { name: FEDERATION.name, sub: FEDERATION.subtitle });
 
-/** Za liste koje nisu vezane za jedno takmičenje (klubovi, rang). */
+/** For lists not tied to one competition (clubs, rankings). */
 const ALL_SEASONS = { name: 'Sve sezone', sub: 'Zbirno kroz sva takmičenja u bazi' };
 
-/** Nula se na papiru ne piše — prazno polje se brže čita od kolone nula. */
+/** Zero is not printed — an empty cell reads faster than a zero column. */
 const numCell = (n, align = 'center', strong = false) =>
   cell(n ? num(n) : null, align, strong);
 
 /**
-  * „Disciplina: Kate · Godište: 2010" kad je filter uključen, inače ništa.
-  *
-  * Kad je filter uključen, papir mora da kaže šta je izostavio. Kad nije,
-  * nema šta da se kaže — a red „bez filtera" je objašnjenje, ne podatak.
+  * "Disciplina: Kate · Godište: 2010" when a filter is on, else nothing.
+  * With a filter on, the paper must say what it left out; without one
+  * there is nothing to say.
   */
 const filterNote = (pairs) => filterLabel(pairs);
 
-/** Sve što je prošlo kroz filter, u redosledu u kom stoji na ekranu. */
+/** Everything that passed the filter, in screen order. */
 const keepVisible = (items, key) => {
   const shown = new Set(visibleIds());
   return items.filter((item) => shown.has(String(key(item))));
@@ -2666,9 +2597,9 @@ const seasonContext = (season) => ({
 });
 
 /**
- * Jedna rang lista na papiru — klubovi ili jedna uzrasna kategorija.
- * Namerno ista funkcija za oba: razlika je samo u dve kolone, a jedan oblik
- * lista znači da ceo štos izgleda kao jedan dokument.
+ * One ranking list on paper — clubs or one age category. The same
+ * function for both on purpose: only two columns differ, and one shape
+ * makes the whole stack read as one document.
  */
 function rankingSpec({ season, group, clubs, totals }) {
   const rows = group ? group.rows : clubs;
@@ -2687,7 +2618,7 @@ function rankingSpec({ season, group, clubs, totals }) {
           season.name}`
         : `${rows.length} ${plural(rows.length, 'klub', 'kluba', 'klubova')} · ${season.name}`,
       meta2: `${totals.competitions} ${plural(totals.competitions, 'takmičenje', 'takmičenja', 'takmičenja')} u sezoni`,
-      // Rang lista je zvanična — po njoj se dele pehari, pa se potpisuje.
+      // The ranking list is official — cups follow it, so it is signed.
       signatures: ['Predsednik saveza', 'Sekretar saveza'],
       docCode: group ? `Rang lista ${group.id} · ${season.name}` : `Rang lista klubova · ${season.name}`,
       columns: [
@@ -2709,8 +2640,8 @@ function rankingSpec({ season, group, clubs, totals }) {
           numCell(r.bodovi, 'center', true),
         ],
       })),
-      // Bez zbirnog reda. Bod je nečiji — takmičarev, i preko njega klupski;
-      // zbir bodova svih na listi ne pripada nikome i ne znači ništa.
+      // No totals row. A point is somebody's — the competitor's, and
+      // through them the club's; a sum of everybody's belongs to nobody.
       summary: '',
       summaryRight: '',
     },
@@ -2718,8 +2649,8 @@ function rankingSpec({ season, group, clubs, totals }) {
 }
 
 /**
- * Ceo štos za završetak sezone: klubovi pa svaka uzrasna kategorija, svaka
- * kao zaseban list sa svojom numeracijom strana.
+ * The whole season-closing stack: clubs, then every age category, each
+ * its own sheet with its own page numbering.
  */
 const seasonStack = ({ season, data }) => [
   rankingSpec({ season, group: null, clubs: data.clubs, totals: data.totals }),
@@ -2727,13 +2658,9 @@ const seasonStack = ({ season, data }) => [
 ];
 
 /**
- * Raspored takmičara na borilištima — list koji izlazi iz štampača izgleda
- * kao onaj koji savez i danas pravi: **kolona je borilište**, a red je
- * termin. Prvi red su prve kategorije na svakom borilištu, drugi red druge,
- * i tako dok se najduža kolona ne isprazni.
- *
- * Kolone se čitaju odozgo naniže, pa red koji negde nema šta da stavi
- * ostaje prazan — i to je tačno, jer to borilište tada nema termin više.
+ * The mat schedule on paper, shaped like the federation's own sheet: a
+ * column per mat, a row per slot. Columns read top down; a row with
+ * nothing for some mat stays empty there — correct, that mat has no slot.
  */
 function tatamiSpec({ competition, pairs, plan }) {
   const { columns, pool } = tatamiCards(pairs, plan);
@@ -2742,10 +2669,10 @@ function tatamiSpec({ competition, pairs, plan }) {
   const people = assigned.reduce((a, c) => a + c.people, 0);
   const nerasporedjeno = pool.reduce((a, c) => a + c.pairs.length, 0);
 
-  // Više od dva borilišta uspravno daje kolone uže od imena discipline, pa
-  // se prvo pokušava položen list. Uspravan je viši i primi dužu kolonu, pa
-  // ostaje kao druga mogućnost — renderer bira onaj na kom ceo raspored
-  // staje na jedan list.
+  // More than two mats portrait makes columns narrower than discipline
+  // names, so landscape is tried first; portrait is taller and takes a
+  // longer column, so it stays as the fallback. The renderer picks the
+  // one where everything fits one sheet.
   const orientations = plan.count > 2 ? ['landscape', 'portrait'] : ['portrait', 'landscape'];
 
   return {
@@ -2762,9 +2689,8 @@ function tatamiSpec({ competition, pairs, plan }) {
       // Bez potpisa — raspored je radni list koji se lepi na zid i menja
       // tokom dana, a ne protokol koji neko overava.
       docCode: 'Raspored na borilištima',
-      // Tabla, a ne tabela: kolona je borilište i teče sama za sebe, pa
-      // raspored u kom jedno borilište ima mnogo više stavki od ostalih i
-      // dalje staje na jedan list.
+      // A board, not a table: a column is a mat and flows on its own, so
+      // one busy mat still fits the sheet.
       board: {
         orientations,
         columns: columns.map((list, i) => ({
@@ -2783,9 +2709,8 @@ function tatamiSpec({ competition, pairs, plan }) {
 }
 
 /**
- * Kalendar na papiru: mesec kao naslov reda, pa takmičenja pod njim. A i B
- * lista jedna za drugom, jer se i gledaju zajedno — koliko toga ima u martu
- * je pitanje na koje se odgovara bez obzira na listu.
+ * The calendar on paper: month as a row heading, competitions under it.
+ * A and B lists one after the other — they are read together.
  */
 function calendarSpec({ season, competitions, counts }) {
   const rows = [];
@@ -2838,18 +2763,16 @@ function calendarSpec({ season, competitions, counts }) {
 }
 
 /**
- * Grana žreba na papiru.
- *
- * Prva strana (ili prve tri, kad se kategorija deli) je grana sa mestom za
- * upis osvojenih mesta i potpisom **glavnog sudije** — on je taj ko žreb
- * overava. Iza toga ide spisak takmičara te kategorije: ime, prezime, klub i
- * ništa više, jer se sa tog papira proziva na tatamiju.
+ * The draw bracket on paper. The first page (or three, when a category
+ * splits) is the bracket with places for results and the head referee's
+ * signature — the referee is who certifies the draw. Then the category's
+ * competitor list: name and club only, for calling out at the mat.
  */
 /**
- * Ekipa u grani stoji pod imenom pod kojim je i prijavljena — klub, sa
- * brojem kad ih klub ima više u istoj kategoriji. Ime se ne izmišlja ovde
- * nego dolazi sa zapisa (`labelTeams` u data.js), da grana, spisak i prijava
- * govore isto.
+ * A team in the bracket stands under the name it was entered with — the
+ * club, numbered when the club has several in the category. The name
+ * comes from the record (labelTeams in data.js), so bracket, list and
+ * entry all say the same.
  */
 const teamEntrants = (teams) => teams.map((t) => ({
   name: t.label || t.club, club: t.club, team: t,
@@ -2880,8 +2803,8 @@ function drawSpec({ competition, category }) {
         ? plural(bracket.entries, 'ekipa', 'ekipe', 'ekipa')
         : plural(bracket.entries, 'takmičar', 'takmičara', 'takmičara')} · grana od ${bracket.size}`
         + (bracket.byes ? ` · ${bracket.byes} ${plural(bracket.byes, 'slobodan prolaz', 'slobodna prolaza', 'slobodnih prolaza')}` : ''),
-      // Ostaje samo upozorenje — ono nije objašnjenje nego podatak koji
-      // glavni sudija mora da vidi pre nego što potpiše.
+      // Only the warning stays — not an explanation but a fact the head
+      // referee must see before signing.
       meta2: clash
         ? `PAŽNJA: ${clash} ${plural(clash, 'par', 'para', 'parova')} iz istog kluba`
         : '',
@@ -2890,9 +2813,9 @@ function drawSpec({ competition, category }) {
     };
   });
 
-  // Spisak iza grane. Kod ekipa je red po članu, a članovi jedne ekipe stoje
-  // zajedno (`groupId`) — ekipa presečena na dve strane nije spisak nego
-  // zagonetka.
+  // The list behind the bracket. For teams it is a row per member, and a
+  // team's members stay together (groupId) — a team cut across two pages
+  // is a puzzle, not a list.
   const rows = [];
   if (category.isTeam) {
     [...people]
@@ -3063,17 +2986,14 @@ function clubsSpec({ clubs }) {
 }
 
 /**
- * Rezultati se čitaju iz samog ekrana, a ne iz baze: redosled disciplina i
- * kategorija, koje su prošle kroz filter i koji je plasman izabran — sve
- * to već stoji u DOM-u, tačno onako kako korisnik gleda. Plasman se uzima
- * iz izbora, pa i ono što je upravo uneto a još nije osveženo ide na papir.
+ * Results are read from the screen, not the database: discipline order,
+ * what passed the filter and which placement is picked all sit in the
+ * DOM exactly as the user sees them — including a pick made a second ago.
  */
 /**
- * Rezultati jedne kategorije, poređani za pisanje diploma.
- *
- * Diplome se pišu čim se kategorija završi, a ne kad se završi celo takmičenje,
- * pa svaka kategorija ima svoj list. Redosled je redosled mesta — prvo, drugo,
- * dva treća, pa ostali — jer se tim redom i popunjavaju.
+ * One category's results, ordered for writing diplomas. Diplomas are
+ * written as each category finishes, so each has its own sheet. Order is
+ * place order — first, second, two thirds, then the rest.
  */
 function resultsCategorySpec({ competition, registry, results, key }) {
   const byEntry = new Map(results.map((r) => [r.entryId, r]));
@@ -3123,7 +3043,7 @@ function resultsCategorySpec({ competition, registry, results, key }) {
   };
 }
 
-/** Rezultati jedne ekipne kategorije — red je ekipa, uz spisak članova. */
+/** One team category's results — a row per team, members listed. */
 function teamCategorySpec({ competition, registry, byEntry, key }) {
   const teams = registry.teams.filter((t) => teamKeyOf(t) === key);
   if (!teams.length) return null;
@@ -3184,7 +3104,7 @@ function resultsDisciplineSpecs({ competition, registry, results, discipline }) 
 
 function resultsSpec({ competition, registry }) {
   const byId = new Map(registry.entries.map((e) => [e.id, e]));
-  // Ekipa na papiru punih rezultata: naziv tima na mestu imena, bez godišta.
+  // A team on the full results sheet: team name where the name goes, no year.
   registry.teams.forEach((t) => byId.set(t.id, { name: t.label, club: t.club, year: '' }));
   const rows = [];
   let groupIndex = 0;
@@ -3223,8 +3143,8 @@ function resultsSpec({ competition, registry }) {
   const done = rows.filter((r) => r.cells[5].value).length;
 
   return {
-    // Položeno: ime kategorije je dugačko („Grupa A · poletarci · žene ·
-    // 0. nivo"), a prelomljeno u dva reda razbija tabelu na pola.
+    // Landscape: category names are long ("Grupa A · poletarci · žene ·
+    // 0. nivo") and wrapping them breaks the table in half.
     orientation: 'landscape',
     context: competitionContext(competition),
     spec: {
@@ -3237,8 +3157,8 @@ function resultsSpec({ competition, registry }) {
         ['Pol', document.getElementById('f-sex')?.value ? sexLabel(document.getElementById('f-sex').value) : ''],
         ['Godište', document.getElementById('f-year')?.value],
       ])}`,
-      // Rezultat je zvaničan čim se potpiše, pa ovaj list ima mesta za potpis.
-      // (Oznaka liste stoji u meta2 iznad kad je takmičenje na B listi.)
+      // A result is official once signed, so this sheet has signature
+      // lines. (The B-list note sits in meta2 above.)
       signatures: ['Glavni sudija', 'Delegat saveza'],
       docCode: 'Rezultati po kategorijama',
       columns: [
@@ -3247,8 +3167,8 @@ function resultsSpec({ competition, registry }) {
         col('Plasman', '78px', 'center'), col('Bodovi', '52px', 'center'),
       ],
       rows,
-      // Bez zbirnog reda — koliko je plasmana uneto stoji u zaglavlju, a zbir
-      // bodova svih takmičara na listi nije ničiji podatak.
+      // No totals row — the count of entered placements is in the
+      // header, and a sum of everybody's points is nobody's number.
       summary: `${groupIndex} ${plural(groupIndex, 'kategorija', 'kategorije', 'kategorija')}`,
       summaryRight: '',
     },
@@ -3256,10 +3176,9 @@ function resultsSpec({ competition, registry }) {
 }
 
 /**
- * Jedna izmena rasporeda: primeni je na plan, upiši i iscrtaj.
- *
- * Nema dugmeta „sačuvaj". Raspored se pravi u hali, uz sto, dok se prijave
- * još slažu — svaka izmena mora da preživi zatvaranje poklopca laptopa.
+ * One schedule change: apply to the plan, save, redraw. No save button —
+ * the schedule is made in the hall while entries are still coming, and
+ * every change must survive the laptop lid closing.
  */
 async function updateTatami(change) {
   if (!tatamiState) return;
@@ -3269,14 +3188,14 @@ async function updateTatami(change) {
   render();
 }
 
-/** Parovi koje jedna kartica obuhvata na datom borilištu. */
+/** The pairs one card covers on a given mat. */
 function cardPairs(plan, key, mat) {
   const axis = axisOf(plan);
   return tatamiState.pairs.filter((pair) =>
     axis.key(pair) === key && (plan.pairs[pair.id] || 0) === mat);
 }
 
-// ── Modali ─────────────────────────────────────────────────────────────
+// === Modals =============================================
 
 const modalRoot = document.getElementById('modal');
 
@@ -3385,8 +3304,8 @@ function newCompetitionModal() {
       return;
     }
 
-    // Popunjavanje piše hiljadu i po zapisa — dugme mora da kaže da radi,
-    // inače izgleda kao da se ništa nije desilo.
+    // Filling writes over a thousand records — the button must say it is
+    // working, or it looks like nothing happened.
     const submit = event.target.querySelector('button[type="submit"]');
     if (values.withRegistry) {
       submit.disabled = true;
@@ -3401,8 +3320,8 @@ function newCompetitionModal() {
         + `prijava (${num(competition.competitors)} takmičara) i postavljeno kao aktuelno.`
       : `Takmičenje „${competition.name}" (${competition.calendar} lista) je sačuvano `
         + 'i stoji i u kalendaru i u evidenciji.');
-    // Ostani gde si i bio: iz kalendara se upisuje datum, iz evidencije se
-    // otvara takmičenje. Skok na drugi ekran bi prekinuo oba posla.
+    // Stay where you are: the calendar enters a date, the register opens
+    // a competition. Jumping screens would interrupt both.
     if (routeOf().id !== 'kalendar') location.hash = 'takmicenja';
     render();
   });
@@ -3450,7 +3369,7 @@ function confirmDeleteModal(competition) {
   modalRoot.querySelector('[data-confirm-delete]').focus();
 }
 
-// ── Poruka ─────────────────────────────────────────────────────────────
+// === Toast =============================================
 
 let toastTimer = null;
 function toast(message) {
@@ -3461,7 +3380,7 @@ function toast(message) {
   toastTimer = setTimeout(() => { box.hidden = true; }, 4000);
 }
 
-// ── Iscrtavanje ────────────────────────────────────────────────────────
+// === Rendering =============================================
 
 const app = document.getElementById('app');
 
@@ -3499,11 +3418,11 @@ async function render() {
   const screen = routeOf();
   const competition = await store.activeCompetition();
 
-  // Šta ovaj ekran štampa. Gradi se tek kad se pritisne dugme, nad podacima
-  // koji su ionako već ovde — a filtere pročita sa ekrana u tom trenutku,
-  // pa papir uvek prati ono što korisnik gleda.
+  // What this screen prints. Built only when the button is pressed, over
+  // data already here — and it reads the filters off the screen at that
+  // moment, so paper always follows what the user sees.
   let printable = null;
-  /** Postoji samo na rang listi — završetak sezone traži podatke odavde. */
+  /** Exists only on the rankings — season closing takes its data from here. */
   let seasonAction = null;
   tatamiState = null;
   drawState = null;
@@ -3563,8 +3482,8 @@ async function render() {
     const registry = await store.registryFor(competition?.id);
     const index = drawIndex(registry);
     body = drawHtml({ competition, index });
-    // Žreb se ne štampa dugmetom u zaglavlju nego po kategoriji, pa ovaj
-    // ekran namerno nema `printable` — Cmd+P ovde nema šta da odštampa.
+    // The draw prints per category, not from the header button, so this
+    // screen deliberately has no printable — Cmd+P has nothing to print.
     drawState = { competition, index };
   } else if (screen.view === 'import') {
     const competitions = await store.listCompetitions();
@@ -3621,8 +3540,8 @@ async function render() {
   closeSeasonAction = seasonAction;
 
   const kicker = screen.kicker ? screen.kicker() : (competition?.name || FEDERATION.name);
-  // Dugme „Štampaj" stoji samo tamo gde stvarno ima šta da se odštampa, i
-  // uvek prvo — ostale akcije su ređe, a štampa je svakodnevna.
+  // The Štampaj button appears only where there is something to print,
+  // and always first — other actions are rarer, printing is daily.
   const actions = [...(printable ? [{ label: 'Štampaj', go: 'print', quiet: true }] : []),
     ...(seasonAction ? [{ label: 'Završetak sezone', go: 'zavrsi-sezonu', primary: true }] : []),
     ...(screen.actions || [])];
@@ -3751,8 +3670,8 @@ async function render() {
   if (mats) {
     mats.addEventListener('change', () => updateTatami((plan) => {
       const count = Number(mats.value);
-      // Stavka koja je stajala na borilištu kojeg više nema vraća se u spisak
-      // umesto da tiho nestane sa rasporeda.
+      // An item placed on a mat that no longer exists returns to the
+      // pool instead of quietly vanishing from the schedule.
       Object.keys(plan.pairs).forEach((id) => {
         if (plan.pairs[id] > count) plan.pairs[id] = 0;
       });
@@ -3761,9 +3680,9 @@ async function render() {
     document.getElementById('f-axis').addEventListener('change', (event) =>
       updateTatami((plan) => { plan.axis = event.target.value; }));
     document.getElementById('mats-spread').addEventListener('click', () => updateTatami((plan) => {
-      // Ravnomerno po broju takmičara, a ne po broju stavki: borilište sa dve
-      // velike grupe radi duže od onog sa četiri male. Deli se po kartici
-      // izabrane podele, da ono što ide zajedno i ostane zajedno.
+      // Balanced by competitor count, not item count: a mat with two big
+      // groups works longer than one with four small ones. Split by card
+      // of the chosen grouping, so what belongs together stays together.
       const axis = axisOf(plan);
       const cards = new Map();
       tatamiState.pairs.forEach((pair) => {
@@ -3791,11 +3710,11 @@ async function render() {
   if (seasonFilter) {
     seasonFilter.addEventListener('change', () => {
       seasonPick = seasonFilter.value;
-      // Druga sezona ima druge kategorije, pa izbor liste kreće iz klubova.
+    // Another season has other categories, so the list pick resets to clubs.
       rankPick = 'klubovi';
       render();
     });
-    // Prazna sezona nema izbor liste — samo birač sezona.
+    // An empty season has no list to pick — only the season picker.
     document.getElementById('f-rank')?.addEventListener('change', (event) => {
       rankPick = event.target.value;
       render();
@@ -3809,16 +3728,16 @@ async function render() {
     document.getElementById('f-sex').addEventListener('change', applyResultsFilter);
     document.getElementById('f-year').addEventListener('change', applyResultsFilter);
     document.getElementById('f-reset').addEventListener('click', () => {
-      // Meni kategorija se gradi iznova, ne samo prazni — inače bi
-      // onDisciplineFilterChange vratio ranije izabranu kategoriju.
+      // The category menu is rebuilt, not just cleared — otherwise the
+      // discipline change would restore the previously picked category.
       discFilter.value = '';
       document.getElementById('f-cat').innerHTML = categoryOptions(resultsIndex, '');
       document.getElementById('f-sex').value = '';
       document.getElementById('f-year').value = '';
       applyResultsFilter();
     });
-    // Popunjenost medalja se čita iz samih izbora, pa se računa posle
-    // iscrtavanja umesto da se dva puta piše ista logika u HTML-u.
+    // Medal slot usage is read from the selects themselves, so it is
+    // computed after render instead of writing the logic twice.
     updateResultsProgress();
   }
 
@@ -3826,9 +3745,9 @@ async function render() {
 }
 
 /**
- * Žreb ima dva filtera koja rade zajedno: tekst i vrsta kategorije
- * (pojedinačno / ekipno). Zato ima svoju funkciju umesto zajedničke — dva
- * uslova nad istim redom se ne daju složiti iz dve nezavisne pretrage.
+ * The draw has two filters working together: text and category kind
+ * (individual / team). Hence its own function — two conditions on the
+ * same row cannot be assembled from two independent searches.
  */
 function applyDrawFilter() {
   const needle = (document.getElementById('draw-search')?.value || '').trim().toLowerCase();
@@ -3861,15 +3780,15 @@ function applyDrawFilter() {
 function filterList(event) {
   const needle = event.target.value.trim().toLowerCase();
   let shown = 0;
-  // Isti filter služi i tabelama i spisku kategorija za žreb — sve nosi
-  // `data-search`, pa selektor ne mora da zna o kom je ekranu reč.
+  // The same filter serves tables and the draw's category list — both
+  // carry data-search, so the selector does not care which screen it is.
   const rows = [...document.querySelectorAll('[data-search]')];
   rows.forEach((row) => {
     const match = !needle || row.dataset.search.includes(needle);
     row.hidden = !match;
     if (match) shown += 1;
   });
-  // Disciplina bez ijedne pogođene kategorije se sklanja cela.
+  // A discipline with no matching category hides whole.
   document.querySelectorAll('.draw-disc').forEach((disc) => {
     disc.hidden = !disc.querySelector('.draw-cat:not([hidden])');
   });
@@ -3883,11 +3802,11 @@ function filterList(event) {
   count.textContent = needle ? `${shown} od ${rows.length}` : `${shown} ${noun}`;
 }
 
-// ── Događaji ───────────────────────────────────────────────────────────
+// === Events =============================================
 
 document.addEventListener('click', async (event) => {
-  // Zatvara ga dugme „Otkaži" ili klik na zatamnjenu pozadinu — ali ne i klik
-  // bilo gde unutar samog prozorčeta, iako mu je pozadina roditelj.
+  // Closed by the Otkaži button or a click on the dimmed backdrop — but
+  // not by a click anywhere inside the dialog itself.
   if (event.target.closest('button[data-close]') || event.target.classList.contains('backdrop')) {
     closeModal();
     return;
@@ -3911,8 +3830,8 @@ document.addEventListener('click', async (event) => {
       competition,
       isNew: true,
       entries: [],
-      // Prazna prijava, sa merama koje se ionako biraju: godište u sredini
-      // uzrasne tabele, beli pojas, prvi klub po azbuci.
+      // A blank entry, with the values one would pick anyway: a year in
+      // the middle of the age table, a white belt, the first club.
       competitor: {
         id: null, name: '', sex: 'M', year: season - 12,
         belt: 'beli', club: CLUBS[0].name, weight: null,
@@ -3954,12 +3873,12 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
-  // Većina prijavljenih dobija učešće; menja se samo šačica sa medaljom. Zato
-  // se učešće upisuje odjednom, i to samo tamo gde plasman još ne stoji.
+  // Most entrants get participation; only the medallists change. So
+  // participation is written in one go, only where no placement stands.
   if (event.target.closest('[data-fill-ucesce]')) {
     const competition = await store.activeCompetition();
     if (!competition) return;
-    // Filter važi i ovde, kao i pri štampi: menja se ono što je na ekranu.
+    // The filter applies here as in print: what is on screen changes.
     const ids = visibleIds('.result-row[data-print-id]');
     const upisano = await store.fillPlacement(competition.id, ids, 'ucesce');
     toast(upisano
@@ -3969,8 +3888,8 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
-  // Štampa rezultata po kategoriji i po disciplini — diplome se pišu čim se
-  // kategorija završi, ne kad se završi celo takmičenje.
+  // Results print per category and per discipline — diplomas are written
+  // as each category finishes, not when the whole competition does.
   const printDip = event.target.closest('[data-print-diplomas]');
   if (printDip && diplomaState) {
     const cat = diplomaState.cats.find((c) => c.key === printDip.dataset.printDiplomas);
@@ -4008,8 +3927,8 @@ document.addEventListener('click', async (event) => {
     const category = drawState?.index.flatMap((d) => d.categories)
       .find((c) => c.key === draw.dataset.draw);
     if (!category) return;
-    // Grana se izvlači u trenutku pritiska i odmah ide na štampu — ništa se
-    // ne čuva, pa je svaki žreb nov.
+    // The bracket is drawn at the moment of the press and goes straight
+    // to print — nothing is stored, every draw is new.
     printStack([drawSpec({ competition: drawState.competition, category })]);
     return;
   }
@@ -4026,8 +3945,8 @@ document.addEventListener('click', async (event) => {
       const at = list.findIndex((c) => c.key === key);
       const to = at + step;
       if (at < 0 || to < 0 || to >= list.length) return;
-      // Redosled se piše nad celom kolonom, ne samo nad dve kartice koje se
-      // menjaju — inače bi kolona posle nekoliko pomeranja imala rupe.
+      // Order is written over the whole column, not just the two moved
+      // cards — otherwise the column grows gaps after a few moves.
       const next = [...list];
       [next[at], next[to]] = [next[to], next[at]];
       next.forEach((c, i) => { plan.order[`${plan.axis}|${c.key}`] = i + 1; });
@@ -4058,7 +3977,7 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
-  // ── Uvoz prijava ───────────────────────────────────────────────────
+  // === Entry import =============================================
   if (event.target.closest('[data-import-clear]')) {
     resetImport();
     render();
@@ -4070,9 +3989,9 @@ document.addEventListener('click', async (event) => {
     const fajlovi = importState.read.filter((r) => r.payload);
     if (!fajlovi.length || !target) return;
 
-    // Svi fajlovi ulaze u jednu istu bazu, jedan za drugim. Prepoznavanje
-    // lica i preskakanje već upisanih rade preko svih — pa dva kluba koja
-    // greškom prijave istog čoveka ne prave dva zapisa.
+    // All files go into one database, one after another. Person matching
+    // and skip-already-imported work across all of them — two clubs that
+    // both enter the same person do not create two records.
     const zbir = {
       files: 0, competitors: 0, entries: 0, teams: 0, skipped: 0, teamsSkipped: 0,
       transfers: [],
@@ -4083,8 +4002,8 @@ document.addEventListener('click', async (event) => {
         zbir.files += 1;
         ['competitors', 'entries', 'teams', 'skipped', 'teamsSkipped']
           .forEach((k) => { zbir[k] += done[k]; });
-        // Ovi se ne sabiraju u broj nego se imenuju — o svakom od njih
-        // urednik treba da odluči je li imenjak ili čovek koji je prešao klub.
+        // These are named, not counted — the editor decides for each
+        // whether it is a namesake or a club change.
         done.transfers.forEach((n) => zbir.transfers.push(n));
       }
       const into = await store.getCompetition(target);
@@ -4106,8 +4025,8 @@ document.addEventListener('click', async (event) => {
   if (go) {
     if (go.dataset.go === 'novo-takmicenje') newCompetitionModal();
     else if (go.dataset.go === 'print') {
-      // Filter koji ne pušta nijedan red bi odštampao prazan list, pa se
-      // umesto toga kaže šta je posredi.
+      // A filter that lets no row through would print an empty sheet, so
+      // it says what is going on instead.
       if (!printNow()) toast('Nema nijednog reda za štampu — poništi filter pa probaj ponovo.');
     }
     else if (go.dataset.go === 'zavrsi-sezonu') closeSeasonAction?.();
@@ -4117,11 +4036,11 @@ document.addEventListener('click', async (event) => {
 });
 
 document.addEventListener('change', async (event) => {
-  // ── Uvoz prijava ───────────────────────────────────────────────────
+  // === Entry import =============================================
   if (event.target.id === 'import-target') {
     importPick = event.target.value;
-    // Uzrasne grupe zavise od sezone izabranog takmičenja, pa se fajlovi
-    // čitaju iznova — a i upozorenje da nose drugo takmičenje.
+    // Age groups depend on the picked competition's season, so files are
+    // re-read — and the warning about a different competition with them.
     if (importState.files.length) {
       await readImportFiles(await store.getCompetition(importPick));
     }
@@ -4134,8 +4053,8 @@ document.addEventListener('change', async (event) => {
     if (!files.length) return;
     importPick = document.getElementById('import-target')?.value || importPick;
     resetImport();
-    // Redosled kojim ih pregledač preda ume da bude proizvoljan; po imenu
-    // fajla je bar isti svaki put.
+    // The browser hands files over in arbitrary order; by file name it
+    // is at least the same every time.
     importState.files = files.sort((x, y) => x.name.localeCompare(y.name, 'sr'));
     await readImportFiles(await store.getCompetition(importPick)
       || await store.activeCompetition());
@@ -4150,10 +4069,10 @@ document.addEventListener('change', async (event) => {
     const from = Number(card.dataset.mat);
     const to = Number(move.value);
     await updateTatami((plan) => {
-      // Premešta se tačno ono što ta kartica na tom borilištu i sadrži — grupa
-      // čije dve discipline stoje na dva borilišta seli samo ono odavde.
+      // Moves exactly what that card on that mat contains — a group with
+      // disciplines on two mats moves only what is here.
       cardPairs(plan, key, from).forEach((pair) => { plan.pairs[pair.id] = to; });
-      // Na dno kolone: nova kartica ide iza onih koje su već raspoređene.
+      // To the bottom of the column: a new card goes after the placed ones.
       plan.order[`${plan.axis}|${key}`] = to ? 999 : 0;
     });
     return;
@@ -4162,8 +4081,9 @@ document.addEventListener('change', async (event) => {
   const pick = event.target.closest('.result-pick');
   if (!pick) return;
 
-  // Meni popunjena mesta i ne nudi, ali izbor ume da stigne i mimo menija —
-  // tastaturom, dopunom pregledača. Prekoračenje se vraća pre upisa u bazu.
+  // The menu does not offer taken places, but a pick can arrive past the
+  // menu — keyboard, browser autofill. Overflow is reverted before the
+  // database write.
   const cat = pick.closest('.cat');
   const slots = placementSlots(cat?.dataset.disc, pick.value);
   if (pick.value && slots !== null) {
@@ -4189,8 +4109,8 @@ document.addEventListener('change', async (event) => {
     await store.setResult(entry, pick.value);
   }
 
-  // Bez ponovnog iscrtavanja: dugačak spisak ne sme da skoči na vrh posle
-  // svakog upisa. Menja se samo ono što se zaista promenilo.
+  // No re-render: a long list must not jump to the top after every
+  // entry. Only what actually changed is updated.
   pick.classList.add('is-saved');
   setTimeout(() => pick.classList.remove('is-saved'), 1200);
   const row = pick.closest('.result-row');
@@ -4219,6 +4139,6 @@ store.ready()
     </div>`;
   });
 
-// Zaštita od tihog brisanja se traži odmah pri pokretanju, ne tek kad neko
-// otvori Podešavanja — do tada bi pregledač već mogao da počisti bazu.
+// Storage protection is requested right at launch, not when somebody
+// opens Podešavanja — by then the browser could have swept the database.
 store.ready().then(() => store.storageProtection()).catch(() => {});

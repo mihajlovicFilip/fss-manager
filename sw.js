@@ -1,21 +1,19 @@
 /**
- * Service worker — makes the app open and print with no network at all.
+ * Service worker — keeps the app opening and printing with no network.
  *
- * Everything is precached on install. Serving is **network-first with a cache
- * fallback**, which for this application is the only sane order: the server is
- * always on localhost, so "network" costs nothing and the browser can never
- * show yesterday's build. When the server is not running — the genuinely
- * offline case — the cache answers instead.
+ * Everything is precached on install. Serving is network-first with a cache
+ * fallback: the server is localhost, so the network costs nothing and the
+ * browser can never show yesterday's build. Without the server, the cache
+ * answers instead.
  *
- * It used to be cache-first, and that produced the worst possible failure: the
- * folder on disk was current while the browser kept serving an older release,
- * with no visible sign of it. Hence also the version marker in the navigation.
+ * It used to be cache-first, which kept serving an old build with no visible
+ * sign of it — hence network-first, and the version marker in the navigation.
  *
  * Bump CACHE whenever any file below changes; the old cache is deleted on
  * activate.
  */
 
-const CACHE = 'fss-manager-v64';
+const CACHE = 'fss-manager-v65';
 
 const SHELL = [
   './',
@@ -73,11 +71,9 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
 
-  // `cache: 'reload'` zaobilazi keš pregledača. Bez toga service worker ume
-  // da dobije staru kopiju iz njega i da je pošteno sačuva kao „poslednje
-  // viđeno" — pa se stara verzija drži i kad je server odavno nova.
-  // Navigacija se izuzima: zahtev za stranu ne sme da se preslaže sa drugim
-  // podešavanjima, pregledač na to odgovara greškom.
+  // cache: 'reload' skips the browser HTTP cache, so the worker never saves
+  // a stale copy as the "last seen" state. Navigation requests are excluded
+  // because the browser rejects them when their options are changed.
   const fresh = request.mode !== 'navigate'
     && new URL(request.url).origin === self.location.origin
     ? fetch(request, { cache: 'reload' }) : fetch(request);
@@ -85,8 +81,8 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fresh
       .then((response) => {
-        // Što je viđeno, to je i sačuvano — keš tako uvek drži poslednje
-        // stanje, a ne ono od instalacije.
+        // Save whatever loads, so the cache always holds the latest
+        // state, not the install-time one.
         if (response.ok && new URL(request.url).origin === self.location.origin) {
           const copy = response.clone();
           caches.open(CACHE).then((cache) => cache.put(request, copy));
@@ -94,8 +90,8 @@ self.addEventListener('fetch', (event) => {
         return response;
       })
       .catch(() => caches.match(request, { ignoreSearch: true }).then((hit) => hit
-        // Deep link ili osvežavanje bez servera i dalje otvara aplikaciju,
-        // umesto stranice o grešci.
+        // A deep link or refresh with no server still opens the app
+        // instead of an error page.
         || (request.mode === 'navigate'
           ? caches.match('index.html', { ignoreSearch: true }) : undefined)))
   );

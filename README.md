@@ -10,7 +10,7 @@ even for fonts. A laptop carried into a sports hall with no signal behaves
 exactly as it does in the office.
 
 > **The application interface is in Serbian**, as is the Excel entry form the
-> clubs fill in. Code, file names and documentation are in English.
+> clubs fill in. Code, comments, file names and documentation are in English.
 
 ---
 
@@ -631,9 +631,9 @@ browser loads them. `industry.css` carries exactly one local change against the
 design project — its Google Fonts `@import` was deleted, as that was the last
 thing on the page reaching the network.
 
-Code comments are currently in Serbian; they document decisions taken in
-Serbian. Everything else — file names, folders, functions and constants — is in
-English.
+Everything in the code — comments, file names, folders, functions and
+constants — is in English; only the UI text and printed documents are in
+Serbian.
 
 ### Data model
 

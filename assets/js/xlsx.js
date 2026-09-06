@@ -1,35 +1,30 @@
 /**
- * Čitanje .xlsx fajla — bez ijedne biblioteke i bez mreže.
+ * Reading an .xlsx file — no library, no network.
  *
- * Klubovi prijave popunjavaju u Excelu, pa aplikacija mora da otvori tuđi
- * fajl. Cela stvar staje u dva koraka, jer je .xlsx u suštini zip pun XML-a:
+ * An .xlsx is a zip full of XML, so two steps cover it:
  *
- *   1. **Zip** se raspakuje `DecompressionStream('deflate-raw')`-om, koji
- *      pregledač već ima. To je jedini razlog zašto ovde nema biblioteke od
- *      sto kilobajta — inflate je ionako ugrađen, samo mu treba pročitati
- *      zaglavlja.
- *   2. **XML** se čita `DOMParser`-om. Sve što nam treba je `sharedStrings`
- *      i po jedan `sheet` — ostalo (stilovi, teme, tabele) nas ne zanima.
+ *   1. The zip is unpacked with DecompressionStream('deflate-raw'),
+ *      which the browser already has.
+ *   2. The XML is read with DOMParser. All we need is sharedStrings
+ *      and the sheets — styles and themes are ignored.
  *
- * Vraća se najprostiji mogući oblik: list je niz redova, red je niz vrednosti
- * po kolonama. Prazna ćelija je `null`, i to na svom mestu — kolona F ostaje
- * kolona F i kad su E i G prazne.
+ * The result is the simplest possible shape: a sheet is an array of rows,
+ * a row an array of values by column. An empty cell is null, in place —
+ * column F stays column F even when E and G are empty.
  *
- * Šta se namerno **ne** radi: ne računaju se formule. Čitaju se zapamćene
- * vrednosti koje je Excel upisao uz njih, a sve što je iz nečega izvedeno
- * (uzrasna grupa, na primer) aplikacija ionako izvodi sama iz pravilnika —
- * tuđem fajlu se ne veruje na reč.
+ * Formulas are deliberately not evaluated. Only the cached values Excel
+ * stored are read; everything derived is recomputed by the app anyway.
  */
 
-// ── Zip ────────────────────────────────────────────────────────────────
+// === Zip =============================================
 
 const EOCD = 0x06054b50;
 const CENTRAL = 0x02014b50;
 const LOCAL = 0x04034b50;
 
 /**
- * Raspakuje zip u mapu `ime → Uint8Array`. Traži se samo ono što je zvano,
- * jer .xlsx ume da nosi i stotinu fajlova koji nam ne trebaju.
+ * Unpacks a zip into a name → Uint8Array map. Only requested entries are
+ * read — an .xlsx can carry a hundred files we do not need.
  *
  * @param {ArrayBuffer} buffer
  * @param {(name: string) => boolean} wanted
@@ -38,8 +33,8 @@ async function unzip(buffer, wanted = () => true) {
   const view = new DataView(buffer);
   const bytes = new Uint8Array(buffer);
 
-  // Rep zip-a je zapis o sadržaju, a njegova dužina zavisi od komentara na
-  // kraju — zato se traži unazad, a ne računa.
+  // The end-of-directory record has a variable-length comment, so it is
+  // found by scanning backwards, not computed.
   let eocd = -1;
   const from = Math.max(0, buffer.byteLength - 66_000);
   for (let i = buffer.byteLength - 22; i >= from; i--) {
@@ -65,8 +60,8 @@ async function unzip(buffer, wanted = () => true) {
     if (!wanted(name)) continue;
     if (view.getUint32(localAt, true) !== LOCAL) continue;
 
-    // Lokalno zaglavlje ume da ima drugačiju dužinu dodataka od centralnog,
-    // pa se početak podataka računa odavde, ne odande.
+    // The local header can carry different extra-field lengths than the
+    // central one, so the data offset is computed from here.
     const start = localAt + 30 + view.getUint16(localAt + 26, true)
       + view.getUint16(localAt + 28, true);
     const raw = bytes.subarray(start, start + size);
@@ -80,7 +75,7 @@ async function inflate(data) {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-// ── XML ────────────────────────────────────────────────────────────────
+// === XML =============================================
 
 const text = (bytes) => new TextDecoder().decode(bytes);
 
@@ -90,7 +85,7 @@ const parse = (xml) => {
   return doc;
 };
 
-/** "BC7" → 54. Slova su broj u osnovi 26, samo bez nule. */
+/** "BC7" → 54. Column letters are a base-26 number without a zero. */
 export function columnIndex(ref) {
   let n = 0;
   for (const ch of ref) {
@@ -102,9 +97,9 @@ export function columnIndex(ref) {
 }
 
 /**
- * Vrednost jedne ćelije. `t` kaže šta je unutra: `s` je broj u spisku
- * zajedničkih niski, `inlineStr` tekst na licu mesta, `b` logička vrednost,
- * `e` greška u formuli, a bez oznake je broj.
+ * One cell's value. `t` says what is inside: `s` an index into shared
+ * strings, `inlineStr` text in place, `b` a boolean, `e` a formula error,
+ * and no attribute means a number.
  */
 function cellValue(cell, shared) {
   const t = cell.getAttribute('t');
@@ -127,8 +122,8 @@ function sheetRows(xml, shared) {
   const doc = parse(xml);
   const rows = [];
   for (const row of doc.getElementsByTagName('row')) {
-    // `r` je broj reda u Excelu; prazni redovi se u fajlu ne zapisuju, pa se
-    // razmak mora namestiti da bi red 11 ostao red 11.
+    // `r` is the Excel row number; empty rows are not written to the
+    // file, so gaps must be restored for row 11 to stay row 11.
     const at = Number(row.getAttribute('r') || rows.length + 1) - 1;
     const values = [];
     for (const cell of row.getElementsByTagName('c')) {
@@ -143,10 +138,10 @@ function sheetRows(xml, shared) {
   return rows;
 }
 
-// ── Radna sveska ───────────────────────────────────────────────────────
+// === Workbook =============================================
 
 /**
- * Otvara .xlsx i vraća njegove listove.
+ * Opens an .xlsx and returns its sheets.
  *
  * @param {File|Blob|ArrayBuffer} input
  * @returns {Promise<{names: string[], sheet(name: string): (string|number|null)[][]}>}
@@ -172,8 +167,8 @@ export async function readWorkbook(input) {
     }
   }
 
-  // Ime lista vodi do njegovog fajla preko r:id — redosled u workbook.xml
-  // nije isti kao redosled fajlova u zipu, pa se ne sme pretpostaviti.
+  // A sheet name maps to its file through r:id — the order in
+  // workbook.xml does not match the zip, so it must not be assumed.
   const targets = new Map();
   const rels = files.get('xl/_rels/workbook.xml.rels');
   if (rels) {

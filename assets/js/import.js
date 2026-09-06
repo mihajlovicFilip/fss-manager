@@ -1,27 +1,21 @@
 /**
- * Čitanje prijave koju je klub popunio u Excelu.
+ * Reading a club's completed entry form.
  *
- * Formular (`form/FSS-Entry-Form.xlsx`) klubovi popunjavaju kod sebe;
- * aplikaciju ne otvaraju. Ovde stiže njihov fajl, i ovo je jedino mesto gde
- * tuđi podaci ulaze u aplikaciju — pa je celo pravilo ovog modula:
+ * This is the only place where somebody else's file enters the app, so:
  *
- * **Ništa se ne uzima na reč.** Excel ima svoje padajuće menije i svoju
- * kolonu „Provera", ali to je pomoć trenerima, ne zaštita. Fajl može da
- * stigne popunjen ručno, iz Google tabela, iz starije verzije formulara ili
- * sa isključenim proverama. Zato se ovde sve računa iznova iz pravilnika u
- * `data.js`: uzrasna grupa iz godišta, dozvoljene discipline iz grupe,
- * telesna težina iz grupe i pola. Izvedene kolone iz fajla se **ne čitaju**.
+ * Nothing is taken on trust. The form's menus and its "Provera" column
+ * help the coach, they are not protection — the file can arrive typed by
+ * hand or from an old form. Everything is recomputed from the rulebook in
+ * data.js: age group from year, allowed disciplines from group, weight
+ * from group and sex. Derived columns in the file are never read.
  *
- * **Kolone se traže po naslovu, ne po mestu.** Trener koji doda kolonu ili
- * zamrzne prvi red ne sme da obori uvoz.
+ * Columns are found by header, not by position — an added column or a
+ * frozen row must not break the import.
  *
- * **Uzrast se računa po sezoni takmičenja u koje se uvozi**, ne po današnjem
- * datumu. Prijava koja u januaru stigne za prošlogodišnje takmičenje razvrstava
- * se po tabeli te sezone.
+ * Age is computed for the competition's season, not today's date.
  *
- * **Red koji ne valja ne obara ostale.** Svaki red nosi svoju poruku o tome
- * šta mu fali, sa brojem reda iz Excela — savez tako zna šta tačno da javi
- * klubu, a ispravni redovi mogu da uđu odmah.
+ * A bad row does not sink the others. Every row carries its own message
+ * with its Excel row number, so the club can be told exactly what to fix.
  */
 
 import {
@@ -30,7 +24,7 @@ import {
 } from './data.js';
 import { readWorkbook } from './xlsx.js';
 
-// ── Sitni pomoćnici ────────────────────────────────────────────────────
+// === Helpers =============================================
 
 const LETTERS = 'A-Za-zČčĆćĐđŠšŽž';
 const NAME_OK = new RegExp(`^[${LETTERS}][${LETTERS} '-]*$`);
@@ -38,9 +32,8 @@ const NAME_OK = new RegExp(`^[${LETTERS}][${LETTERS} '-]*$`);
 const tidy = (v) => String(v ?? '').trim().replace(/\s+/g, ' ');
 
 /**
- * Ključ po kome se poredе naslovi kolona i vrednosti iz menija: bez naših
- * kvačica, malim slovima, bez razmaka. „Ime i prezime", „IME I PREZIME" i
- * „ime i prezime " su ista stvar, a takva razlika ne sme da obori uvoz.
+ * Key used to compare headers and menu values: lowercase, no diacritics,
+ * no spaces — "Ime i prezime" and "IME I PREZIME" are the same thing.
  */
 const key = (v) => tidy(v).toLowerCase()
   .replace(/[čć]/g, 'c').replace(/đ/g, 'dj').replace(/š/g, 's').replace(/ž/g, 'z')
@@ -54,7 +47,7 @@ const nameProblem = (value) => {
   return null;
 };
 
-/** „muški", „M", „m" → 'M'. Prazno vraća prazno. */
+/** "muški", "M", "m" → 'M'. Empty stays empty. */
 function readSex(value) {
   const k = key(value);
   if (!k) return '';
@@ -65,7 +58,7 @@ function readSex(value) {
 
 const readBelt = (value) => BELTS.find((b) => key(b) === key(value)) || '';
 
-/** Telesna težina stiže i kao broj i kao tekst: 75, „75", „75 kg", „+84", „apsolutna". */
+/** Weight arrives as number or text: 75, "75", "75 kg", "+84", "apsolutna". */
 function readWeight(value, allowed) {
   const raw = tidy(value).replace(/\s*kg\s*$/i, '');
   if (!raw) return '';
@@ -73,21 +66,18 @@ function readWeight(value, allowed) {
 }
 
 /**
- * Da li je red prazan **tamo gde se čita**.
- *
- * Formular nosi sto dvadeset praznih redova sa formulama i okvirima, pa red
- * nije prazan zato što u njemu nema ničega — nego zato što u njemu nema
- * ničega **što se unosi**. Izvedene kolone se ne broje.
+ * Is the row empty where we actually read it? The form carries 120 blank
+ * rows full of formulas, so only the input columns count.
  */
 const rowIsEmpty = (row, columns) => !row
   || columns.every((c) => c === undefined || row[c] === null || tidy(row[c]) === '');
 
-/** Posle ovoliko praznih redova zaredom tabela je gotova. */
+/** After this many empty rows in a row, the table is over. */
 const KRAJ = 5;
 
 /**
- * Napomena ispod tabele nije red prijave. Prepoznaje se po tome što je duga
- * rečenica u prvoj koloni — nijedno ime ni disciplina nemaju šezdeset slova.
+ * A note under the table is not an entry row: it is one long sentence in
+ * a single column — no name or discipline has sixty characters.
  */
 const isNote = (row, columns) => {
   const filled = columns.filter((c) => c !== undefined && tidy(row[c]));
@@ -95,8 +85,8 @@ const isNote = (row, columns) => {
 };
 
 /**
- * Nalazi red sa naslovima i pravi mapu `ključ naslova → indeks kolone`.
- * Traži se red u kome stoje svi zadati naslovi, među prvih pedeset.
+ * Finds the header row and maps header key → column index. Looks for a
+ * row containing all required headers, within the first fifty.
  */
 function headerRow(rows, required) {
   for (let i = 0; i < Math.min(rows.length, 50); i++) {
@@ -111,7 +101,7 @@ function headerRow(rows, required) {
   return null;
 }
 
-/** Vrednosti iz zaglavlja fajla: naziv polja u jednoj koloni, upis u sledećoj. */
+/** Header fields: label in one column, the value to its right. */
 function headerFields(rows, wanted) {
   const found = {};
   for (let i = 0; i < Math.min(rows.length, 30); i++) {
@@ -120,7 +110,7 @@ function headerFields(rows, wanted) {
       const k = key(row[c]);
       const want = wanted.find((w) => key(w) === k);
       if (want && found[want] === undefined) {
-        // Upis stoji desno od naziva; prazna ćelija između se preskače.
+        // The value sits right of the label; blank cells are skipped.
         for (let n = c + 1; n < c + 4 && n < Math.max(row.length, c + 4); n++) {
           if (tidy(row[n])) { found[want] = tidy(row[n]); break; }
         }
@@ -133,7 +123,7 @@ function headerFields(rows, wanted) {
 const sheetLike = (book, ...words) => book.names.find((n) =>
   words.some((w) => key(n).includes(key(w))));
 
-// ── Pojedinačne prijave ────────────────────────────────────────────────
+// === Individual entries =============================================
 
 function readSolo(rows, season) {
   const head = headerRow(rows, ['Godište', 'Ime i prezime']);
@@ -147,8 +137,8 @@ function readSolo(rows, season) {
   const cPol = col('Pol');
   const cPojas = col('Pojas');
   const cKg = col('Telesna težina');
-  // Discipline su sve kolone čiji naslov počinje na „Disciplina" — koliko ih
-  // formular ima, toliko se i čita.
+  // Disciplines are all columns whose header starts with "Disciplina" —
+  // however many the form has.
   const cDisc = [];
   head.map.forEach((at, k) => { if (k.startsWith('disciplina')) cDisc.push(at); });
   cDisc.sort((a, b) => a - b);
@@ -196,8 +186,8 @@ function readSolo(rows, season) {
         disciplines.push(d);
       }
 
-      // Telesna težina se traži samo tamo gde se kategorija po njoj i deli — uz
-      // sportski kumite. Tradicionalni je apsolutna kategorija.
+      // Weight is required only where the category is split by it —
+      // sport kumite. Traditional kumite is an open category.
       const weighed = disciplines.find((d) => d.drawBy === 'weight');
       const allowed = WEIGHTS[group]?.[sex] || [];
       const weight = readWeight(row[cKg], allowed);
@@ -233,7 +223,7 @@ function readSolo(rows, season) {
   return { rows: out };
 }
 
-// ── Ekipne prijave ─────────────────────────────────────────────────────
+// === Team entries =============================================
 
 function readTeams(rows, season) {
   const head = headerRow(rows, ['Disciplina']);
@@ -243,7 +233,7 @@ function readTeams(rows, season) {
   const cDisc = col('Disciplina');
   const cVrsta = col('Vrsta');
 
-  // Članovi stoje u trojkama „1. godište · 1. ime i prezime · 1. pol".
+  // Members come in triples: "1. godište · 1. ime i prezime · 1. pol".
   const members = [];
   for (let n = 1; n <= 8; n++) {
     const god = col(`${n}. godište`);
@@ -288,8 +278,8 @@ function readTeams(rows, season) {
         if (bad) return bad;
         const sex = readSex(row[m.pol]);
         if (!sex) return `članu „${who}" nije unet pol`;
-        // I član ekipe se upisuje u pisanom obliku — inače isti čovek stoji
-        // jednako u spisku pojedinačnih a drugačije u ekipi.
+        // Team member names get the same written form as individual
+        // entries, so the same person reads the same everywhere.
         people.push({ name: properName(who), sex, year, group: groupOfYear(year, season) });
       }
 
@@ -310,8 +300,8 @@ function readTeams(rows, season) {
           ? `${d.team.min} člana` : `${d.team.min}–${d.team.max} člana`}, a uneto ih je ${people.length}`;
       }
 
-      // Vrstu bira klub samo tamo gde je disciplina zaista ima (enbu);
-      // ostale ekipe su jednog pola, pa im vrstu određuje sastav.
+      // The club picks a variant only where the discipline has one
+      // (enbu); other teams are single-sex, so the members decide it.
       const variants = teamVariants(d);
       const picked = tidy(row[cVrsta]);
       const variant = d.variants
@@ -342,18 +332,16 @@ function readTeams(rows, season) {
   return { rows: out };
 }
 
-// ── Ceo fajl ───────────────────────────────────────────────────────────
+// === Whole file =============================================
 
 /**
- * Čita prijavu iz .xlsx fajla.
- *
- * Nikad ne baca — prima fajl koji je stigao spolja i može biti bilo šta.
+ * Reads an entry file. Never throws — the file arrived from outside and
+ * can be anything.
  *
  * @returns {Promise<{error?: string, payload?: object, summary?: object,
  *                    people?: object[], teams?: object[]}>}
- *   `people` i `teams` su **svi** pročitani redovi, i ispravni i neispravni,
- *   sa brojem reda iz Excela — ekran ih tako može prikazati sve, a uvesti
- *   samo one koji valjaju.
+ *   `people` and `teams` are all rows read, valid and invalid, each with
+ *   its Excel row number — the screen shows all, imports only the valid.
  */
 export async function readEntryFile(file, season = SEASON()) {
   let book;

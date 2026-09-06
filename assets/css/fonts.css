@@ -1,20 +1,11 @@
-/* ══════════════════════════════════════════════════════════════════════════
-   Barlow & Barlow Condensed — served from this folder, not from a CDN.
+/*=============================================================================
+   Barlow and Barlow Condensed are stored locally so official documents
+   can be printed without an internet connection.
 
-   The app has to print official documents in sports halls with no internet,
-   so no stylesheet here may reach the network. These are the upstream
-   Google Fonts releases (SIL Open Font License 1.1 — see assets/fonts/OFL.txt),
-   subset to Latin + Latin Extended and converted to WOFF.
-
-   Latin Extended is kept on purpose: club and competitor names from
-   Vojvodina carry Hungarian, Slovak and Romanian diacritics alongside the
-   Serbian č ć ž š đ.
-
-   There is no Cyrillic here, and nothing on the sheet needs it: Barlow ships
-   none, and the uzrasne grupe are coded in Latin A–J for exactly that reason
-   (see AGES in assets/js/data.js). Any Cyrillic text added later would fall
-   back to a system font and set about twice as wide as its surroundings.
-   ══════════════════════════════════════════════════════════════════════ */
+   Latin Extended is included for Serbian and other regional characters.
+   Cyrillic is not supported by Barlow, so any Cyrillic text would fall
+   back to a system font and may not match the rest of the document.
+===============================================================================*/
 
 @font-face {
   font-family: 'Barlow';

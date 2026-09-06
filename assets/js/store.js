@@ -1,29 +1,28 @@
 /**
- * Trajno čuvanje podataka — IndexedDB, lokalno, bez servera.
+ * Data storage — IndexedDB, local, no server.
  *
- * Ovo je jedini šav između aplikacije i podataka. Ekrani i dokumenti ne znaju
- * odakle podaci dolaze; zovu funkcije odavde i dobijaju obećanja. Kad jednog
- * dana u hali bude više uređaja, iza istih ovih funkcija stane mali server na
- * laptopu organizatora, a ništa drugo se ne menja.
+ * This is the only seam between the app and its data. Screens and
+ * documents call functions here and get promises; if a small server ever
+ * stands behind these functions, nothing else changes.
  *
- * Zašto IndexedDB, a ne localStorage: localStorage je sinhron (blokira
- * iscrtavanje), drži samo tekst i staje na par megabajta. Jedno takmičenje sa
- * hiljadu i po prijava lako pređe tu granicu.
+ * Why IndexedDB and not localStorage: localStorage is synchronous, holds
+ * only text and caps at a few megabytes — one competition with 1500
+ * entries passes that easily.
  *
- * ── Kako su podaci povezani ────────────────────────────────────────────
+ * === How the data connects =============================================
  *
- *   people        jedno lice, jednom. Živi iznad takmičenja i preko njega se
- *                 sabiraju bodovi kroz sezone. Prepoznaje se po broju licence.
- *   competitors   to lice na jednom takmičenju (klub, pojas, uzrast tog dana)
- *   entries       jedna prijava = takmičar u jednoj disciplini
- *   results       plasman na jednoj prijavi; bodovi se iz njega računaju
- *   teams         ekipne prijave
- *   competitions  sama takmičenja
- *   meta          koje je takmičenje aktuelno, da li je baza napunjena
+ *   people        one person, once. Lives above competitions; points
+ *                 accumulate here across seasons.
+ *   competitors   that person at one competition (club, belt, age group)
+ *   entries       one entry = a competitor in one discipline
+ *   results       a placement on one entry; points derive from it
+ *   teams         team entries
+ *   competitions  the competitions themselves
+ *   meta          active competition, mat plan, seasons
  *
- * Bodovi se nigde ne čuvaju kao broj. Uvek se računaju iz plasmana preko
- * PLACEMENTS u data.js — kad savez promeni skalu, promeni se na jednom mestu
- * i sve stare tabele se same preračunaju.
+ * Points are never stored as a number. They are always computed from
+ * placements via PLACEMENTS in data.js — change the scale in one place
+ * and every old table recalculates itself.
  */
 
 import {
@@ -33,18 +32,16 @@ import {
   levelOfBelt, seasonOf, entriesOpen, FEES_DEFAULT, properName,
 } from './data.js';
 
-/** Demo nosi i jedno takmičenje iz prošle sezone — ono se deli po njenoj tabeli. */
+/** The demo includes one past-season competition, split by its table. */
 const PROSLA_SEZONA = SEASON() - 1;
 
 const DB_NAME = 'fss-manager';
 const DB_VERSION = 2;
 
 /**
- * Ime baze pre nego što je naziv proizvoda ispravljen.
- *
- * Baza u pregledaču se prepoznaje po imenu, pa bi preimenovanje bez prenosa
- * ostavilo sve upisano takmičenje u bazi koju niko više ne otvara. Prenos se
- * radi jednom, pri prvom pokretanju posle ispravke.
+ * The database name before the product name was fixed. A rename without a
+ * migration would strand everything in a database nobody opens any more —
+ * the transfer runs once, on first launch after the fix.
  */
 const PREVIOUS_DB_NAME = 'fss-menager';
 
@@ -61,12 +58,10 @@ const STORES = {
 let dbPromise = null;
 
 /**
- * Prenosi podatke iz baze pod starim imenom, ako je zatekne.
- *
- * Radi se pre otvaranja nove baze i tiho: ako stare nema, ako nova već postoji
- * ili ako pregledač ne ume da izlista baze, prosto se ne desi ništa. Neuspeh
- * prenosa ne sme da obori pokretanje — gore je aplikacija koja se ne otvara
- * nego aplikacija koja krene sa demo podacima.
+ * Moves data from the old database name, if one is found. Runs quietly
+ * before the new database opens; a failed transfer must not break the
+ * launch — an app that will not open is worse than one that starts with
+ * demo data.
  */
 async function migrateFromPreviousName() {
   if (!indexedDB.databases) return;
@@ -121,8 +116,8 @@ function openDb() {
     request.onupgradeneeded = () => {
       const db = request.result;
       const upgrade = request.transaction;
-      // Prodavnice i indeksi se dodaju, nikad ne ruše — baza koja je nastala
-      // pod starijom verzijom mora da preživi nadogradnju sa podacima.
+      // Stores and indexes are only added, never dropped — a database
+      // made by an older version must survive the upgrade with its data.
       Object.entries(STORES).forEach(([name, spec]) => {
         const os = db.objectStoreNames.contains(name)
           ? upgrade.objectStore(name)
@@ -139,7 +134,7 @@ function openDb() {
   return dbPromise;
 }
 
-/** Jedna transakcija, jedno obećanje. `run` dobija objekte prodavnica. */
+/** One transaction, one promise. `run` receives the object stores. */
 async function tx(names, mode, run) {
   const db = await openDb();
   const list = Array.isArray(names) ? names : [names];
@@ -149,11 +144,11 @@ async function tx(names, mode, run) {
     transaction.oncomplete = () => resolve(result);
     transaction.onerror = () => reject(transaction.error);
     transaction.onabort = () => reject(transaction.error || new Error('Transakcija prekinuta'));
-    // Rezultat se pamti, a razrešava tek kad se transakcija zaista upiše —
-    // inače bi čitanje odmah posle upisa moglo da promaši.
+    // The result resolves only once the transaction commits — otherwise
+    // a read right after a write could miss it.
     Promise.resolve(run(...list.map((n) => transaction.objectStore(n))))
       .then((value) => { result = value; })
-      .catch((err) => { try { transaction.abort(); } catch { /* već prekinuta */ } reject(err); });
+      .catch((err) => { try { transaction.abort(); } catch { /* already aborted */ } reject(err); });
   });
 }
 
@@ -167,23 +162,21 @@ const allBy = (osName, index, value) =>
 
 const all = (osName) => tx(osName, 'readonly', (os) => wrap(os.getAll()));
 
-/** crypto.randomUUID traži siguran kontekst; localhost jeste, file:// nije. */
+/** crypto.randomUUID needs a secure context; localhost is, file:// is not. */
 const newId = () => (crypto.randomUUID
   ? crypto.randomUUID()
   : 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10));
 
 /**
- * Šta čini isto lice na dva različita takmičenja.
+ * What makes the same person across two competitions.
  *
- * Broj licence je zvanična identifikacija i ima prednost. Savez ih izdaje, ali
- * ih još nema u bazi, pa se do tada lice određuje sa **ime + godište + klub** —
- * na Filipovu odluku, kao trenutno najpreciznije što postoji.
- *
- * Klub je u identitetu zbog imenjaka: dva kluba umeju da prijave dva različita
- * deteta istog imena i istog godišta, i to se bez kluba ne može razlikovati.
- * Cena te odluke je poznata i namerno prihvaćena: **ko pređe u drugi klub, u
- * bazi je nov takmičar** i bodovi mu kreću od nule. Uvoz takav slučaj prepozna
- * i imenuje (`transfers`), da se ne desi tiho.
+ * A licence number is official and wins when present. Until they are in
+ * the database, a person is name + birth year + club — the most precise
+ * identification available. The club is there because of namesakes: two
+ * clubs really do enter two different children with the same name and
+ * year. The known cost: whoever changes club starts as a new record,
+ * points from zero. The import names every such case (transfers) instead
+ * of deciding quietly.
  */
 const looseIdentity = (person) =>
   `nm:${String(person.name).trim().toLowerCase()}|${person.year}`;
@@ -195,28 +188,25 @@ const identityOf = (person) => {
 };
 
 /**
- * Lica članova jedne ekipe, preko identiteta (ime + godište + klub ekipe).
- *
- * Član se ne pamti sa personId — uvoz i ispravke ga vode po imenu — pa se
- * lice svaki put nađe iznova, istim pravilom kojim ga je uvoz i upisao.
- * Član čije lice ne postoji (ekipa iz baze starije od ove mogućnosti) se
- * preskače: bodovi ne mogu da legnu na red koga nema.
+ * The people behind a team's members, resolved by identity (name + year
+ * + the team's club). A member carries no personId — imports and
+ * corrections track them by name — so the person is found fresh each
+ * time, by the same rule the import used. A member with no person record
+ * (a team from an older database) is skipped.
  */
 const teamMembersOf = (team, personByIdentity) => (team.members || [])
   .map((m) => personByIdentity.get(identityOf({ ...m, club: team.club })))
   .filter(Boolean);
 
-/** Ekipni red rezultata prepoznaje se po oznaci, sa starim `entryId` upisom. */
+/** A team result row, recognised by its kind, addressed via entryId. */
 const teamOf = (result, teamById) => (result.kind === 'team'
   ? teamById.get(result.teamId || result.entryId) || null : null);
 
 /**
- * Prevod zatečenih lica na identitet sa klubom.
- *
- * Baza napravljena ranijom verzijom nosi identitete bez kluba; da se ne
- * prevedu, sledeći uvoz bi svakog od njih video kao nepoznatog i napravio
- * duplikat. Klub se uzima sa **poslednjeg nastupa**, jer je to i klub za koji
- * lice trenutno važi.
+ * Migrates existing people to club-carrying identities. An older database
+ * has identities without the club; unmigrated, the next import would see
+ * everyone as unknown and duplicate them. The club comes from the most
+ * recent appearance.
  */
 async function migrateIdentities() {
   const done = await metaGet('identityVersion', 0);
@@ -241,15 +231,15 @@ async function migrateIdentities() {
   });
 }
 
-// ── Punjenje pri prvom pokretanju ──────────────────────────────────────
+// === Seeding on first run =============================================
 
-/** Prodavnice koje demo puni — i koje se pri osvežavanju demoa prazne. */
+/** Stores the demo fills — and empties when the demo refreshes. */
 const DATA_STORES = ['competitions', 'people', 'competitors', 'entries', 'results', 'teams'];
 
 /**
- * Da li je baza i dalje netaknut demo: tačno dva zasejana takmičenja i
- * nijedno svoje. Čim korisnik upiše svoje takmičenje, demo se više ne dira
- * sam od sebe — bolje da gleda stare brojke nego da izgubi svoj rad.
+ * Is the database still an untouched demo: exactly the two seeded
+ * competitions and none of the user's own. Once the user adds their own,
+ * the demo is never touched automatically — stale numbers beat lost work.
  */
 async function demoUntouched() {
   const competitions = await all('competitions');
@@ -259,10 +249,9 @@ async function demoUntouched() {
 }
 
 /**
- * Baza napunjena starijom verzijom demoa ne pokazuje ono što aplikacija sad
- * ume. Ako je demo netaknut, osveži ga bez pitanja; ako je korisnik već
- * počeo da radi u njemu, ostavi ga na miru i samo obeleži da je zastareo —
- * kontrolna tabla to onda ponudi kao dugme.
+ * A database seeded by an older demo cannot show what the app now does.
+ * An untouched demo refreshes silently; one the user has worked in is
+ * left alone and only marked stale — the dashboard then offers a button.
  */
 async function refreshDemo() {
   const version = await tx('meta', 'readonly', (os) => wrap(os.get('demoVersion')));
@@ -280,15 +269,12 @@ async function refreshDemo() {
 }
 
 /**
- * Pretvara demo registar u zapise jednog takmičenja.
+ * Turns the demo registry into one competition's records: every entry
+ * gets its id and its link to a person. Used both for seeding and for
+ * creating a new competition pre-filled — one path, same shape.
  *
- * `buildRegistry()` vraća listu sa indeksima umesto ključeva; ovde svaka
- * prijava dobija svoj id i vezu ka licu. Isto se koristi i pri zasejavanju
- * baze i kad se **novo takmičenje pravi već popunjeno** — jedan put do
- * podataka, pa novo takmičenje izgleda tačno kao zasejano.
- *
- * @param {string} competitionId  kome se prijave upisuju
- * @param {number} seed           isto seme daje isti registar
+ * @param {string} competitionId  where the entries go
+ * @param {number} seed           same seed, same registry
  */
 function registryRecords(competitionId, seed) {
   const registry = buildRegistry(seed);
@@ -329,8 +315,8 @@ async function seed() {
 
   const { people, competitors, entries, teams } = registryRecords(competitionId, 7);
 
-  // Odigrano takmičenje iz prošle sezone, sa istim licima i upisanim
-  // plasmanima — tek uz njega ukupan zbir bodova ima šta da sabere.
+  // A finished past-season competition with the same people and recorded
+  // placements — without it, the running total has nothing to add.
   const past = seedPastCompetition(people, competitors);
 
   await tx(['competitions', 'people', 'competitors', 'entries', 'teams', 'results', 'meta'], 'readwrite',
@@ -351,10 +337,9 @@ async function seed() {
 }
 
 /**
- * Pravi prošlosezonsko takmičenje od već postojećih lica i deli plasmane.
- * Medalje se ne bacaju nasumično: prijave se grupišu po kategoriji i u svakoj
- * prva tri mesta idu redom, ostali dobijaju učešće — tako u jednoj kategoriji
- * postoji tačno jedno zlato, kao i u stvarnosti.
+ * Builds the past-season competition from existing people and hands out
+ * placements per category — one gold, one silver, two bronzes, the rest
+ * participation — so the numbers look like reality.
  */
 function seedPastCompetition(people, competitors) {
   const competitionId = newId();
@@ -366,29 +351,28 @@ function seedPastCompetition(people, competitors) {
   };
 
   const belts = ['žuti', 'oranž', 'zeleni', 'plavi', 'braon'];
-  // Klub koji lice nosi ove sezone — prošla sezona ga zadržava, osim kod
-  // onih koji su u međuvremenu prešli.
+  // The club a person carries this season — last season keeps it, except
+  // for those who transferred in between.
   const clubOfPerson = new Map(competitors.map((c) => [
     c.personId, { name: c.club, city: c.city, coach: c.coach },
   ]));
   const past = [];
   const entries = [];
 
-  // Prošla sezona: isti ljudi, godinu dana mlađi, pa im uzrasna grupa može
-  // biti druga — zato se disciplina bira po grupi tog takmičenja.
-  // Prošla sezona je manja od aktuelne — otprilike trećina istih ljudi, jer
-  // je to ono što ukupnom zbiru bodova daje šta da sabere, a ne još jedno
-  // prvenstvo iste veličine.
+  // Last season: the same people a year younger, so their age group may
+  // differ — the discipline is picked by that competition's group. It is
+  // smaller than the current one on purpose: about a third of the same
+  // people is what gives the running total something to add.
   people.slice(0, Math.round(people.length / 3)).forEach((person, i) => {
     const year = person.year;
     const group = groupOfYear(year, PROSLA_SEZONA);
     const allowed = disciplinesForGroup(group);
     if (!allowed.length) return;
 
-    // Klub ostaje isti kao ove sezone — prelazak je izuzetak, ne pravilo.
-    // Svaki sedmi menja klub: dovoljno da se vidi kako ranije osvojene
-    // medalje ostaju kod starog kluba i kako rang lista to označi, a da
-    // oznaka „promena kluba" ne stoji na svakom redu i ne izgubi smisao.
+    // The club stays the same as this season — a transfer is the
+    // exception. Every seventh person changes club: enough to show old
+    // medals staying with the old club without the transfer mark losing
+    // its meaning.
     const moved = i % 7 === 3;
     const other = PAST_CLUBS[i % PAST_CLUBS.length];
     const now = clubOfPerson.get(person.id);
@@ -449,9 +433,9 @@ const PAST_CLUBS = [
 ];
 
 /**
- * Baze nastale pre uvođenja lica nemaju `personId` na takmičarima. Ovde se
- * to dopunjuje: za svakog takmičara se nađe ili napravi lice po licenci.
- * Prolazi jednom i posle je bez posla.
+ * Databases from before people existed have no personId on competitors.
+ * This finds or creates a person for each — runs once, then has nothing
+ * to do.
  */
 async function linkPeople() {
   const competitors = await all('competitors');
@@ -492,25 +476,22 @@ async function linkPeople() {
 
 let readyPromise = null;
 
-// ── Javni deo ──────────────────────────────────────────────────────────
+// === Public API =============================================
 
 
-// ── Sezone ─────────────────────────────────────────────────────────────
+// === Seasons =============================================
 
 /*
- * Sezona nije zakucana u kod. Nema pravila „počinje 1. septembra" jer ga
- * savez nema — **urednik određuje** kad sezona počinje i kad se završava,
- * a aplikacija samo pamti šta je odredio.
+ * A season is not hard-coded — the federation has no "starts September
+ * 1st" rule, so the editor decides when it begins and ends and the app
+ * just remembers. A season is a date range: the open one has a start and
+ * no end. Closing writes the end, archives it and opens the next from
+ * the following day. Rankings are computed over competitions in the
+ * range — nothing is copied or frozen, so a correction in a closed
+ * season still moves its list once reopened.
  *
- * Zato je sezona samo raspon datuma: otvorena sezona ima početak i nema
- * kraj, i traje dok je urednik ne zatvori. Zatvaranje upisuje kraj, gurne
- * sezonu u arhivu i otvori sledeću od sutradan. Rang liste se računaju nad
- * takmičenjima koja padaju u taj raspon — ništa se ne prepisuje i ne
- * zamrzava, pa ispravka rezultata u zatvorenoj sezoni i dalje pomera njenu
- * rang listu kad se sezona ponovo otvori.
- *
- * meta['seasons']     zatvorene sezone: { id, name, from, to, closedAt }
- * meta['seasonStart'] datum od kog teče otvorena sezona
+ * meta['seasons']     closed seasons: { id, name, from, to, closedAt }
+ * meta['seasonStart'] the date the open season runs from
  */
 
 const metaGet = async (key, fallback = null) => {
@@ -527,8 +508,8 @@ const dayAfter = (iso) => {
 };
 
 /**
- * „2025/26" kad raspon pređe Novu godinu, inače „2026". Ime je samo predlog:
- * urednik ga menja pri zatvaranju.
+ * "2025/26" when the range crosses New Year, else "2026". Just a
+ * suggestion — the editor changes it on closing.
  */
 function seasonName(from, to) {
   const a = Number((from || '').slice(0, 4));
@@ -538,12 +519,12 @@ function seasonName(from, to) {
   return `${a}/${String(b).slice(2)}`;
 }
 
-/** Da li takmičenje tog datuma pada u sezonu. Otvorena sezona nema gornju među. */
+/** Does a date fall in the season. An open season has no upper bound. */
 const inSeason = (date, season) =>
   !!date && date >= season.from && (!season.to || date <= season.to);
 
 export const store = {
-  /** Otvara bazu, po potrebi je puni i dopunjuje veze. Zovi pre svega. */
+  /** Opens the database, seeds and migrates as needed. Call first. */
   ready() {
     if (!readyPromise) {
       readyPromise = migrateFromPreviousName()
@@ -553,18 +534,18 @@ export const store = {
     return readyPromise;
   },
 
-  /** Da li baza nosi demo stariji od aplikacije, a korisnik već radi u njoj. */
+  /** Does the database carry an older demo the user already works in. */
   async demoIsStale() {
     const row = await tx('meta', 'readonly', (os) => wrap(os.get('demoStale')));
     return !!row;
   },
 
   /**
-   * Zaštita od tihog brisanja. Kad pregledaču zafali prostora na disku, sme
-   * da obriše IndexedDB bez pitanja i bez traga — a u njoj je cela sezona.
-   * `persist()` traži da skladište postane trajno; jednom odobreno važi
-   * trajno, pa se zahtev slobodno ponavlja pri svakom pokretanju. Uz odgovor
-   * ide i zauzeće, da Podešavanja imaju šta da pokažu.
+   * Protection from silent deletion. A browser low on disk space may
+   * clear IndexedDB without asking — and the whole season is in it.
+   * persist() asks for permanent storage; once granted it stays granted,
+   * so the request repeats safely on every launch. Usage comes along so
+   * Podešavanja has something to show.
    */
   async storageProtection() {
     if (!navigator.storage?.persist) return { supported: false };
@@ -578,11 +559,11 @@ export const store = {
     return { supported: true, persisted, usage, quota };
   },
 
-  // ── Takmičenja ───────────────────────────────────────────────────────
+  // === Competitions =============================================
 
   async listCompetitions() {
     const rows = await all('competitions');
-    // Najskorije napred; takmičenja bez datuma na dno.
+    // Most recent first; competitions without a date at the bottom.
     return rows.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   },
 
@@ -600,17 +581,16 @@ export const store = {
       level: data.level,
       calendar: data.calendar === 'B' ? 'B' : 'A',
       description: (data.description || '').trim(),
-      // Iz kalendara se takmičenje upisuje sa osnovnim podacima; discipline
-      // se biraju kasnije, pa prazan izbor znači „sve iz pravilnika".
+      // From the calendar a competition arrives with basic data only;
+      // an empty discipline pick means "everything in the rulebook".
       disciplines: data.disciplines?.length ? data.disciplines : DISCIPLINES.map((d) => d.name),
       status: 'Nacrt',
       createdAt: new Date().toISOString(),
     };
     await tx('competitions', 'readwrite', (os) => os.put(competition));
 
-    // Popunjeno takmičenje: prijave se upisuju odmah, u istom obliku u kom
-    // ih nosi i zasejano. Postoji zato što je čekanje da se stara baza sama
-    // osveži izgubljen posao — novo takmičenje se pravi svež i gotovo.
+    // A pre-filled competition writes its entries immediately, in the
+    // same shape the seeded one carries.
     if (data.withRegistry) {
       // Drugo seme od zasejanog, da to ne budu isti ljudi pod istim imenima.
       const { people, competitors, entries, teams } =
@@ -628,7 +608,7 @@ export const store = {
     return competition;
   },
 
-  /** Briše takmičenje i sve što uz njega ide — prijave, takmičare, rezultate. */
+  /** Deletes a competition and everything with it — entries, results. */
   async deleteCompetition(id) {
     const [competitors, entries, teams, results] = await Promise.all([
       allBy('competitors', 'competitionId', id),
@@ -648,7 +628,7 @@ export const store = {
       const rest = await store.listCompetitions();
       await store.setActiveCompetition(rest.length ? rest[0].id : null);
     }
-    // Lica koja više nigde ne nastupaju nemaju šta da rade u bazi.
+    // People who no longer appear anywhere have no business staying.
     await pruneOrphanPeople();
   },
 
@@ -665,11 +645,11 @@ export const store = {
     return store.getCompetition(await store.activeCompetitionId());
   },
 
-  // ── Prijave ──────────────────────────────────────────────────────────
+  // === Entries =============================================
 
   /**
-   * Prijave jednog takmičenja u obliku u kome ih ekrani i dokumenti očekuju.
-   * Novo takmičenje vraća prazne liste — to je tačno stanje, ne greška.
+   * One competition's entries in the shape screens and documents expect.
+   * A new competition returns empty lists — correct state, not an error.
    */
   async registryFor(competitionId) {
     if (!competitionId) return { competitors: [], entries: [], teams: [] };
@@ -678,9 +658,9 @@ export const store = {
       allBy('entries', 'competitionId', competitionId),
       allBy('teams', 'competitionId', competitionId),
     ]);
-    // Ime pod kojim ekipa nastupa računa se iz onoga što je u bazi, ne čuva
-    // se — broj uz klub zavisi od toga koliko ekipa taj klub ima u toj
-    // kategoriji, a to se menja sa svakom novom prijavom.
+    // A team's display name is computed, never stored — the numeral
+    // depends on how many teams the club has in the category, and that
+    // changes with every new entry.
     labelTeams(teams);
     const people = new Map(competitors.map((c) => [c.id, c]));
     return {
@@ -691,17 +671,14 @@ export const store = {
   },
 
   /**
-   * Uvozi prijavu koju je klub izvezao sa ekrana „Prijava kluba".
+   * Imports one club's entry file — the only place somebody else's file
+   * enters the database, so it is careful:
    *
-   * Ovo je jedino mesto gde tuđi fajl ulazi u bazu, pa se ponaša oprezno:
-   *
-   * **Lice se prepoznaje, ne pravi ponovo.** Ako isti čovek već postoji —
-   * makar sa prošlogodišnjeg takmičenja — prijava se veže za njega, inače mu
-   * bodovi ne bi legli na isti red rang liste.
-   *
-   * **Uvoz dvaput ne pravi duplikate.** Prijava koja već stoji na takmičenju
-   * se preskače i broji odvojeno, da klub sme da pošalje ispravljen fajl bez
-   * straha da će svi biti upisani po dva puta.
+   * A person is recognised, never recreated — an entry binds to an
+   * existing person even from a past season, so points land on one
+   * ranking row. Importing twice creates no duplicates: entries already
+   * on the competition are skipped and counted separately, so a club may
+   * send a corrected file.
    *
    * @returns {{people:number, competitors:number, entries:number, skipped:number,
    *            teams:number, teamsSkipped:number}}
@@ -709,8 +686,8 @@ export const store = {
   async importClubEntry(competitionId, payload) {
     const competition = await store.getCompetition(competitionId);
     if (!competition) throw new Error('Takmičenje nije pronađeno.');
-    // Zabrana stoji ovde, a ne samo na dugmetu: zatvorene prijave znače da se
-    // spisak više ne menja, pa ni uvozom.
+    // The guard lives here, not just on the button: closed entries mean
+    // the list no longer changes — not even by import.
     if (!entriesOpen(competition)) {
       throw new Error(`Na takmičenju „${competition.name}" su prijave zatvorene`
         + ' — uvoz je zaustavljen.');
@@ -728,17 +705,11 @@ export const store = {
     ]);
 
     /**
-     * Koje je lice ovo.
-     *
-     * Identitet je **ime + godište + klub** (dok licenci nema), pa dva kluba
-     * koja prijave dva različita deteta istog imena i istog godišta dobijaju
-     * dva lica — što je i bio razlog za klub u identitetu.
-     *
-     * Naličje te odluke: isto ime i godište pod **drugim** klubom više nije
-     * isti čovek nego novo lice, pa ko pređe u drugi klub kreće od nule.
-     * Aplikacija tu ne odlučuje tiho — takav slučaj se prijavljuje pozivaocu
-     * (`transfers`) sa oba kluba, da urednik zna da je zatečen imenjak ili
-     * prelazak.
+     * Which person is this. Identity is name + year + club (until
+     * licences arrive), so the same name and year under another club is
+     * a new person. Such cases are reported to the caller (transfers)
+     * with both clubs, so the editor knows a namesake or a transfer was
+     * found — never decided quietly.
      */
     const byIdentity = new Map();
     const byLoose = new Map();
@@ -768,8 +739,9 @@ export const store = {
       let person = candidates.find((p) => !busy.has(p.id)) || null;
 
       if (!person) {
-        // Isti čovek pod drugim klubom — ili njegov imenjak. Bez licence se
-        // to ne može razlikovati, pa se upisuje kao novo lice i imenuje.
+        // The same person under another club — or a namesake. Without a
+        // licence there is no telling, so a new person is created and
+        // the case named.
         const elsewhere = (byLoose.get(looseIdentity(c)) || [])
           .filter((p) => String(p.club || '').toLowerCase() !== club.toLowerCase());
         if (elsewhere.length) {
@@ -787,8 +759,8 @@ export const store = {
         newPeople.push(person);
       }
 
-      // Uzrasna grupa se i ovde računa iz godišta, a ne uzima iz fajla:
-      // pravilnik je jedini izvor, ma ko punio prijavu.
+      // The age group is computed from the year here too, never taken
+      // from the file — the rulebook is the only source.
       const group = groupOfYear(c.year, seasonOf(competition)) || c.group || '';
 
       let competitor = hereByClub.get(key(person.id, club));
@@ -797,8 +769,8 @@ export const store = {
           id: newId(), competitionId, personId: person.id,
           name: c.name, sex: c.sex, year: c.year, group,
           club, city, coach, belt: c.belt, level: c.level,
-          // Telesna težina je osobina takmičara, a klub je prijavljuje uz disciplinu
-          // koja se po njoj deli — uzima se prva takva.
+          // Weight belongs to the competitor; the club enters it with a
+          // weight-drawn discipline — the first such is taken.
           weight: (c.disciplines || []).map((d) => d.weight).find(Boolean) || null,
         };
         hereByClub.set(key(person.id, club), competitor);
@@ -812,18 +784,18 @@ export const store = {
         newEntries.push({
           id: newId(), competitionId, competitorId: competitor.id, personId: person.id,
           discipline: d.name, weight: d.weight || null,
-          // Ravan red, isto kao kod zasejanih prijava — spiskovi i dokumenti
-          // čitaju odavde, bez ijednog spajanja.
+          // A flat row, like the seeded entries — lists and documents
+          // read from here with no joins.
           name: c.name, sex: c.sex, year: c.year, group,
           club, city, coach, belt: c.belt, level: c.level,
         });
       });
     });
 
-    // I član ekipe je lice u bazi — bez toga ekipni plasman ne bi imao kome
-    // da upiše bodove. Prepoznaje se istim identitetom (ime + godište + klub)
-    // kao i pojedinačna prijava, a imenjak iz drugog kluba se i ovde imenuje,
-    // ne rešava tiho.
+    // A team member is a person in the database too — otherwise a team
+    // placement would have nobody to credit. Recognised by the same
+    // identity as individual entries; a namesake from another club is
+    // named here as well, never resolved quietly.
     (payload.teams || []).forEach((t) => {
       (t.members || []).forEach((m) => {
         const identity = identityOf({ ...m, club });
@@ -845,8 +817,9 @@ export const store = {
       });
     });
 
-    // Ista ekipa je ista disciplina, grupa, vrsta, klub i isti sastav. Klub
-    // sme da prijavi dve ekipe u istoj kategoriji, pa razlikuje sastav.
+    // The same team is the same discipline, group, variant, club and
+    // members. A club may enter two teams in one category, so the
+    // members are what tells them apart.
     const teamKey = (t) => [t.discipline, t.group, t.variant, t.club,
       (t.members || []).map((m) => m.name).sort().join('|')].join('§');
     const haveTeams = new Set(theirTeams.map(teamKey));
@@ -879,26 +852,21 @@ export const store = {
     };
   },
 
-  // ── Ispravka prijave ─────────────────────────────────────────────────
+  // === Entry corrections =============================================
 
   /**
-   * Šta se sme upisati na prijavu, i šta iz toga sledi.
-   *
-   * Klub greši: pošalje pogrešan pol, promaši godište, upiše disciplinu koja
-   * za taj uzrast ne postoji. Ispravka zato **ne prepisuje samo polje** nego
-   * ponovo izvodi sve što iz njega sledi — uzrasnu grupu iz godišta, nivo iz
-   * pojasa, dozvoljene discipline iz grupe, telesnu težinu iz grupe i pola.
-   * To je isti put kojim ide i uvoz; da ispravka ide drugim putem, ista
-   * prijava bi značila jedno kad stigne iz Excela a drugo kad se ispravi.
-   *
-   * Baca grešku sa rečenicom koja se čita — nju dijalog ispisuje kao što
-   * uvoz ispisuje razlog za red koji nije uvezen.
+   * What may be written on an entry, and what follows from it. A
+   * correction never rewrites just the field — it re-derives everything
+   * downstream: group from year, level from belt, allowed disciplines
+   * from group, weight from group and sex. The same path the import
+   * takes, so an entry means the same thing however it arrived. Throws
+   * a readable sentence the dialog shows, like an import rejection.
    */
   async validateEntry(competition, patch) {
     const season = seasonOf(competition);
-    // Ime se svodi na pisani oblik **pre** svake provere i pre identiteta, pa
-    // se „MARKO MARKOVIĆ" i „Marko Marković" i upisuju isto, a ne samo
-    // prepoznaju kao isto lice.
+    // The name is normalised before any check and before identity, so
+    // "MARKO MARKOVIĆ" and "Marko Marković" are stored the same, not
+    // just recognised as the same person.
     const name = properName(patch.name);
     const year = Number(patch.year) || 0;
     const group = groupOfYear(year, season);
@@ -950,16 +918,11 @@ export const store = {
   },
 
   /**
-   * Upisuje novu prijavu, jednu, iz aplikacije.
-   *
-   * Postoji zbog dana takmičenja: klub dovede takmičara koga na spisku nema,
-   * a čekati ispravljen Excel u hali nema smisla. Ide **istim putem kao
-   * uvoz** — kroz `validateEntry()` i kroz isto prepoznavanje lica — pa
-   * prijava upisana ovde ne znači ništa drugo od one koja je stigla iz
-   * formulara.
-   *
-   * Ko je već prijavljen ne upisuje se drugi put: to je ispravka postojeće
-   * prijave, i poruka tako i kaže.
+   * Writes one new entry from the app — for competition day, when a club
+   * brings a competitor who is not on the list. Goes the same path as
+   * the import (validateEntry, same person matching), so an entry made
+   * here means nothing different. Somebody already entered is refused:
+   * that is a correction, not a second entry.
    */
   async addCompetitor(competitionId, patch) {
     const competition = await store.getCompetition(competitionId);
@@ -976,8 +939,8 @@ export const store = {
       allBy('competitors', 'competitionId', competitionId),
     ]);
 
-    // Isto pravilo kao pri uvozu: zauzeto lice znači ili istu prijavu (greška)
-    // ili imenjaka iz drugog kluba (novo lice).
+    // Same rule as the import: a taken person means either the same
+    // entry (an error) or a namesake from another club (a new person).
     const identity = identityOf(clean);
     const candidates = people.filter((p) => p.identity === identity);
     const busy = new Set(mine.map((c) => c.personId));
@@ -988,8 +951,8 @@ export const store = {
     }
 
     let person = candidates.find((p) => !busy.has(p.id)) || null;
-    // Isto ime i godište pod drugim klubom: imenjak ili prelazak — u oba
-    // slučaja novo lice, jer identitet nosi klub.
+    // Same name and year under another club: namesake or transfer —
+    // a new person either way, because identity carries the club.
     const elsewhere = !person && people.some((p) => !p.licence
       && looseIdentity(p) === looseIdentity(clean)
       && String(p.club || '').toLowerCase() !== clean.club.toLowerCase());
@@ -1014,7 +977,7 @@ export const store = {
       clean.disciplines.forEach((d) => ent.put({
         id: newId(), competitionId, competitorId: competitor.id, personId: person.id,
         discipline: d.name, weight: d.weight,
-        // Ravan red, isto kao kod uvoza — spiskovi i dokumenti čitaju odavde.
+        // A flat row, like the import — lists and documents read from here.
         name: clean.name, sex: clean.sex, year: clean.year, group: clean.group,
         club: clean.club, city: clean.city, coach: clean.coach,
         belt: clean.belt, level: clean.level,
@@ -1025,25 +988,22 @@ export const store = {
       competitorId: competitor.id,
       group: clean.group,
       entries: clean.disciplines.length,
-      // Lice koje je već nastupalo ranije prepoznato je, ne napravljeno opet.
+      // A person who competed before is recognised, not created again.
       known: !isNew,
-      // Isto ime i godište postoji pod drugim klubom — imenjak ili prelazak.
+      // The same name and year exists under another club.
       elsewhere,
     };
   },
 
   /**
-   * Ispravlja jednu prijavu i sve što je iz nje izvedeno.
+   * Corrects one entry and everything derived from it: the person, the
+   * competitor record, every entry row and their details inside teams —
+   * entries are deliberately flat rows, so a correction must visit all.
    *
-   * Menja se lice, zapis takmičara na tom takmičenju, svi njegovi redovi
-   * prijava i podaci o njemu u ekipama — jer su prijave namerno ravni redovi
-   * (spiskovi i dokumenti čitaju odatle, bez ijednog spajanja), pa ispravka
-   * mora da ih obiđe sve.
-   *
-   * **Godište i ime određuju lice.** Ako ispravka od jednog čoveka napravi
-   * onog koji u bazi već postoji — a to je i cilj kad se ispravlja omaška u
-   * godištu — prijava se prevezuje na zatečeno lice, zajedno sa upisanim
-   * plasmanima, da bodovi legnu na isti red rang liste.
+   * Year and name define the person: if the correction turns somebody
+   * into a person the database already knows — the point of fixing a
+   * mistyped year — the entry is re-linked to that person, placements
+   * included, so points land on the right ranking row.
    *
    * @returns {{group:string, added:number, removed:number, teams:number, merged:boolean}}
    */
@@ -1069,9 +1029,10 @@ export const store = {
     ]);
 
     const person = people.find((p) => p.id === competitor.personId) || null;
-    // Klub je deo identiteta, pa ispravka kluba menja i njega — ali **isti
-    // zapis lica**, pa istorija ide za čovekom. To je i razlika između
-    // ispravke (urednik zna da je to isti čovek) i uvoza (ne zna).
+    // The club is part of identity, so correcting it changes identity —
+    // but the same person record, so history follows the person. That is
+    // the difference between a correction (the editor knows it is the
+    // same person) and an import (it cannot know).
     const identity = identityOf({ ...clean, licence: person?.licence || null });
     const twin = people.find((p) => p.identity === identity && p.id !== competitor.personId);
     if (twin && mine.some((c) => c.personId === twin.id && c.id !== competitorId)) {
@@ -1079,7 +1040,7 @@ export const store = {
     }
     const personId = twin ? twin.id : competitor.personId;
 
-    // Prijave: šta ostaje, šta odlazi, šta se dodaje.
+    // Entries: what stays, what goes, what is added.
     const wanted = new Map(clean.disciplines.map((d) => [d.name, d]));
     const removed = theirEntries.filter((e) => !wanted.has(e.discipline));
     const kept = theirEntries.filter((e) => wanted.has(e.discipline));
@@ -1093,13 +1054,13 @@ export const store = {
     };
     const goneIds = new Set(removed.map((e) => e.id));
     const keptIds = new Set(kept.map((e) => e.id));
-    // Plasman upisan na prijavu koje više nema nema se na šta odnositi.
+    // A placement on an entry that no longer exists refers to nothing.
     const goneResults = theirResults.filter((r) => goneIds.has(r.entryId));
     // Ako je prijava prevezana na drugo lice, plasmani idu za njom.
     const movedResults = personId === competitor.personId
       ? [] : theirResults.filter((r) => keptIds.has(r.entryId));
 
-    // Ekipe pamte svoje članove u sebi, pa ih ispravka mora obići.
+    // Teams carry their members inside, so a correction must visit them.
     const touchedTeams = teams.filter((t) =>
       (t.members || []).some((m) => m.name === competitor.name && m.year === competitor.year));
     touchedTeams.forEach((team) => {
@@ -1112,8 +1073,8 @@ export const store = {
     await tx(['people', 'competitors', 'entries', 'results', 'teams'], 'readwrite',
       (ppl, cmp, ent, res, tms) => {
         if (twin) {
-          // Lice koje je ostalo bez ijedne prijave, i ovde i na svim drugim
-          // takmičenjima, nema zašto da stoji u bazi.
+          // A person left with no entries anywhere has no reason to
+          // stay in the database.
           if (person && !elsewhere.some((c) => c.id !== competitorId)) ppl.delete(person.id);
         } else if (person) {
           ppl.put({
@@ -1146,15 +1107,12 @@ export const store = {
   },
 
   /**
-   * Briše jednu prijavu sa takmičenja — takmičara, sve njegove discipline i
-   * sve što je na njima upisano.
-   *
-   * **Ekipa u kojoj je bio član briše se sa njim.** Ekipa kojoj fali čovek
-   * nije ekipa: izvukla bi se i odštampala pogrešna, a niko ne bi video zašto.
-   * Bolje da nestane vidljivo, uz poruku koliko ih je nestalo.
-   *
-   * Lice ostaje u bazi ako je nastupalo i drugde — njegova istorija nije
-   * vlasništvo ovog takmičenja.
+   * Removes one competitor from a competition — their disciplines and
+   * everything written on them. A team they were in goes with them: a
+   * team missing a member would draw and print wrong with nobody seeing
+   * why. Better it disappears visibly, with a message saying how many.
+   * The person stays if they competed elsewhere — their history is not
+   * this competition's property.
    */
   async removeCompetitor(competitionId, competitorId) {
     const competition = await store.getCompetition(competitionId);
@@ -1189,12 +1147,11 @@ export const store = {
     return { entries: theirEntries.length, teams: goneTeams.length };
   },
 
-  // ── Plasmani i bodovi ────────────────────────────────────────────────
+  // === Placements and points =============================================
 
   /**
-   * Upisuje plasman na jednu prijavu. `placement` je ključ iz PLACEMENTS, a
-   * prazna vrednost briše upis — takmičar koji je nastupio ali plasman još
-   * nije unet ne sme da nosi bodove.
+   * Writes a placement on one entry. `placement` is a PLACEMENTS key; an
+   * empty value deletes the record — no placement, no points.
    */
   async setResult(entry, placement) {
     const existing = (await allBy('results', 'entryId', entry.id))[0] || null;
@@ -1217,10 +1174,10 @@ export const store = {
   },
 
   /**
-   * Plasman jedne ekipe. Red rezultata nosi `kind: 'team'` i ekipu umesto
-   * lica — bodove članovima ne upisuje ovde nego ih, kao i sve ostalo,
-   * izvode zbirovi iz plasmana: svaki član dobija pune bodove na svoj
-   * karton, a klubu se ekipna medalja broji jednom, ne po članu.
+   * One team's placement. The result row carries kind: 'team' and the
+   * team instead of a person — members are not credited here but by the
+   * tallies, like everything else: each member full points on their own
+   * record, the club one medal per team, not per member.
    */
   async setTeamResult(team, placement) {
     const existing = (await allBy('results', 'entryId', team.id))[0] || null;
@@ -1232,7 +1189,7 @@ export const store = {
     const result = {
       id: existing?.id || newId(),
       competitionId: team.competitionId,
-      // `entryId` nosi ekipu zbog postojećeg indeksa; `kind` kaže šta je red.
+      // entryId carries the team id to reuse the existing index.
       entryId: team.id,
       teamId: team.id,
       personId: null,
@@ -1246,16 +1203,12 @@ export const store = {
   },
 
   /**
-   * Upisuje isti plasman na sve prijave koje ga još nemaju.
+   * Writes the same placement on every entry that has none yet — most
+   * competitors get participation, only medallists change. Entries that
+   * already have a placement are untouched; one transaction, because two
+   * thousand separate writes would take a while.
    *
-   * Postoji zbog jedne stvari na dan takmičenja: većina prijavljenih dobija
-   * učešće, a menja se samo šačica onih sa medaljom. Bez ovoga bi se svaki od
-   * dve hiljade redova otvarao ručno.
-   *
-   * Prijava koja već ima plasman se **ne dira** — ovo dopunjuje, ne prepisuje.
-   * Sve ide u jednu transakciju, jer bi dve hiljade zasebnih upisa trajale.
-   *
-   * @returns {number} koliko je prijava dobilo plasman
+   * @returns {number} how many entries received the placement
    */
   async fillPlacement(competitionId, entryIds, placement) {
     if (!placementByKey(placement)) throw new Error(`Nepoznat plasman: ${placement}`);
@@ -1265,7 +1218,7 @@ export const store = {
       allBy('results', 'competitionId', competitionId),
     ]);
     const taken = new Set(results.map((r) => r.entryId));
-    // U spisku sa ekrana stoje i prijave i ekipe — razvrstava ih baza, ne ekran.
+    // The screen's id list mixes entries and teams — sorted out here.
     const wanted = new Set(entryIds);
     const missing = entries.filter((e) => wanted.has(e.id) && !taken.has(e.id));
     const missingTeams = teams.filter((t) => wanted.has(t.id) && !taken.has(t.id));
@@ -1302,19 +1255,19 @@ export const store = {
   },
 
   /**
-   * Zbir po licu: medalje i bodovi na traženom takmičenju, i ukupno kroz sve
-   * sezone. Bodovi se svaki put računaju iz plasmana, nikad ne stoje upisani.
+   * Per-person tally: medals and points at one competition, and totals
+   * across seasons. Points are always computed from placements, never
+   * stored.
    *
    * @returns {Map<string, {here: Tally, total: Tally, competitions: number}>}
-   *   ključ je personId; Tally je { zlato, srebro, bronza, ucesce, medalje, bodovi }
+   *   keyed by personId; Tally is { zlato, srebro, bronza, ucesce, medalje, bodovi }
    */
   async tallyByPerson(competitionId) {
     const [results, competitions, teams, register] = await Promise.all([
       all('results'), all('competitions'), all('teams'), all('people'),
     ]);
-    // Bodove nose samo takmičenja sa A liste, i to tek kad su zatvorena.
-    // Medalja se broji odmah — u kolonu ulazi čim se plasman upiše, bez
-    // obzira na listu i na to da li je takmičenje gotovo.
+    // Only closed A-list competitions carry points. A medal counts
+    // immediately, whatever the list and whether the competition is done.
     const scoring = new Set(competitions.filter(pointsCounted).map((c) => c.id));
     const teamById = new Map(teams.map((t) => [t.id, t]));
     const personByIdentity = new Map(register.map((p) => [p.identity, p]));
@@ -1342,7 +1295,7 @@ export const store = {
     };
 
     results.forEach((r) => {
-      // Ekipni plasman: svaki član dobija pune bodove i medalju na svoj red.
+      // A team placement: every member gets full points and the medal.
       const team = teamOf(r, teamById);
       if (team) {
         teamMembersOf(team, personByIdentity).forEach((p) => score(p.id, r));
@@ -1357,8 +1310,9 @@ export const store = {
   },
 
   /**
-   * Nastupi jednog lica kroz sve sezone — po jedno takmičenje, sa prijavama i
-   * plasmanima. Ovo je karton takmičara: gde je nastupao i šta je osvojio.
+   * One person's appearances across all seasons — one row per
+   * competition, with entries and placements. The competitor's record
+   * card.
    */
   async careerFor(personId) {
     if (!personId) return [];
@@ -1370,8 +1324,8 @@ export const store = {
 
     const rows = [];
     for (const competitor of competitors) {
-      // Namerno redom, ne paralelno: jedan takmičar ima nekoliko nastupa, a
-      // ovako je kod čitljiv i baza svakako radi iz memorije.
+      // Sequential on purpose: a person has a handful of appearances,
+      // and the database works from memory anyway.
       const competition = await store.getCompetition(competitor.competitionId);
       if (!competition) continue;
       const entries = await allBy('entries', 'competitorId', competitor.id);
@@ -1384,7 +1338,7 @@ export const store = {
     return rows.sort((a, b) => (b.competition.date || '').localeCompare(a.competition.date || ''));
   },
 
-  /** Menja stanje takmičenja (nacrt → prijave → završeno i nazad). */
+  /** Changes the competition state (draft → entries → finished, and back). */
   async setCompetitionStatus(id, status) {
     const competition = await store.getCompetition(id);
     if (!competition) return null;
@@ -1394,10 +1348,9 @@ export const store = {
   },
 
   /**
-   * Briše sve i puni bazu ispočetka demo podacima. Treba kad se pravilnik
-   * promeni — godišta uzrasnih grupa i matrica disciplina su ugrađeni u već
-   * upisane prijave, pa se stara demo baza ne poklapa sa novom tabelom.
-   * Prava takmičenja ovo naravno briše, zato ide uz potvrdu.
+   * Deletes everything and reseeds the demo. Needed when the rulebook
+   * changes — groups and disciplines are baked into stored entries. This
+   * deletes real competitions too, hence the confirmation.
    */
   async resetDemo() {
     await tx([...DATA_STORES, 'meta'], 'readwrite',
@@ -1407,15 +1360,12 @@ export const store = {
   },
 
   /**
-   * Zbir po klubovima kroz sve sezone: medalje, bodovi, koliko lica i koliko
-   * nastupa. Medalja se pripisuje klubu koji je takmičar **tada** predstavljao
-   * — zapis `competitors` nosi klub tog dana, pa promena kluba ne premešta
-   * ranije osvojene medalje.
+   * Per-club totals across all seasons: medals, points, people and
+   * entries. A medal belongs to the club the competitor represented that
+   * day — the competitor record carries it, so a transfer moves nothing.
+   * A team medal counts once for the club, however many members won it.
    *
-   * Ekipni plasmani se ovde još ne broje: rezultat visi o prijavi
-   * (`entries`), a ekipe su zaseban zapis bez rezultata.
-   *
-   * @returns {{clubs: Array, totals: Object}} klubovi sortirani po bodovima
+   * @returns {{clubs: Array, totals: Object}} clubs sorted by points
    */
   async clubTally() {
     const [competitors, entries, results, competitions, teams, register] = await Promise.all([
@@ -1442,8 +1392,8 @@ export const store = {
       return clubs.get(name);
     };
 
-    // Prvo klubovi i njihovi ljudi — da se u spisku vidi i klub koji još nema
-    // nijednu medalju.
+    // Clubs and their people first — so a club with no medals yet still
+    // shows on the list.
     competitors.forEach((c) => {
       if (!c.club) return;
       const club = clubOf(c.club);
@@ -1453,8 +1403,8 @@ export const store = {
     });
     entries.forEach((e) => { if (e.club) clubOf(e.club).entries += 1; });
 
-    // I ekipa pripada klubu: njeni članovi ulaze u broj lica, prijava u broj
-    // prijava — da klub koji nastupa samo ekipno ne izgleda kao da ga nema.
+    // A team belongs to its club too: members count as people, the team
+    // as an entry — a club competing only in teams must not look absent.
     teams.forEach((t) => {
       if (!t.club) return;
       const club = clubOf(t.club);
@@ -1465,8 +1415,8 @@ export const store = {
     });
 
     results.forEach((r) => {
-      // Ekipna medalja se klubu broji jednom — ekipa je jedan plasman, ma
-      // koliko članova imala. Bodove po članu vodi lični karton, ne ovaj zbir.
+      // A team medal counts once for the club — one placement, however
+      // many members. Per-member points live on the personal record.
       const team = teamOf(r, teamById);
       const name = team ? team.club : (() => {
         const entry = entryById.get(r.entryId);
@@ -1480,10 +1430,10 @@ export const store = {
       if (scoring.has(r.competitionId)) club.bodovi += pointsFor(r.placement);
     });
 
-    // `personIds` ostaje uz klub, ne samo brojka: kad se spisak filtrira,
-    // zbir takmičara mora da bude broj *jedinstvenih* lica u toj podlisti, a
-    // to se ne dobija sabiranjem kolone — isti čovek nastupa i za svoj klub
-    // na više takmičenja, i (posle prelaska) za dva različita kluba.
+    // personIds stays with the club, not just a count: a filtered list
+    // must count unique people, and that is not the sum of a column —
+    // the same person appears for one club at several competitions, and
+    // after a transfer for two different clubs.
     const list = [...clubs.values()]
       .map((c) => ({
         ...c,
@@ -1495,8 +1445,8 @@ export const store = {
         || b.medalje - a.medalje
         || a.name.localeCompare(b.name, 'sr'));
 
-    // Zbir se ne dobija sabiranjem kolone „takmičari": ko je nastupao za dva
-    // kluba broji se u oba, pa bi zbir bio veći od stvarnog broja lica.
+    // The total is not the sum of the column: whoever competed for two
+    // clubs counts in both, so the sum would overshoot.
     const everyone = new Set(competitors.map((c) => c.personId).filter(Boolean));
     teams.forEach((t) => teamMembersOf(t, personByIdentity)
       .forEach((p) => everyone.add(p.id)));
@@ -1509,16 +1459,13 @@ export const store = {
 
   listPeople() { return all('people'); },
 
-  // ── Raspored po borilištima ──────────────────────────────────────────
+  // === Mat schedule =============================================
 
   /**
-   * Plan borilišta za jedno takmičenje: koliko ih ima i šta se na kom radi.
-   *
-   * Čuva se **samo odluka urednika** — broj borilišta i, po bloku, na koje
-   * ide, kojim redom i koje discipline. Sami blokovi se ne čuvaju: oni se
-   * izvode iz prijava pri svakom otvaranju, pa prijava koja stigne posle
-   * pravljenja rasporeda ne ostane nevidljiva. Zapis koji više nema svoju
-   * grupu prosto ostane neupotrebljen.
+   * The mat plan for one competition. Only the editor's decision is
+   * stored — mat count and, per block, which mat, order and disciplines.
+   * The blocks themselves are derived from entries on every open, so an
+   * entry arriving after the plan was made does not stay invisible.
    */
   async tatamiPlan(competitionId) {
     const prazan = { count: 2, axis: 'uzrast', pairs: {}, order: {} };
@@ -1533,23 +1480,21 @@ export const store = {
       axis: plan.axis,
       pairs: plan.pairs,
       order: plan.order,
-      // Zapis starijeg oblika ostaje dok se ne prevede, pa se ništa ne gubi
-      // ako se plan otvori starijom verzijom aplikacije.
+      // The older-format record stays until translated, so nothing is
+      // lost if an older app version opens the plan.
       blocks: plan.blocks,
       migrated: plan.migrated,
       savedAt: new Date().toISOString(),
     });
   },
 
-  // ── Upis na diplome ──────────────────────────────────────────────────
+  // === Diploma setup =============================================
 
   /**
-   * Gde se na diplomi šta upisuje.
-   *
-   * Podešavanje je osobina **blanko diplome, ne takmičenja**: isti tiraž se
-   * troši godinama, pa se meri jednom i čuva za sve. Zapisuje se ceo, sa
-   * podrazumevanim merama pod onim što nije upisano, da starije podešavanje
-   * ne ostane bez reda koji je u međuvremenu dodat.
+   * Where each diploma line is written. A property of the blank diploma,
+   * not the competition: one print run lasts years, so it is measured
+   * once. Stored whole, with defaults under anything missing, so an
+   * older setup does not lose a line added since.
    */
   async diplomaSetup() {
     const row = await metaGet('diploma', null);
@@ -1568,13 +1513,11 @@ export const store = {
     });
   },
 
-  // ── Kotizacije ───────────────────────────────────────────────────────
+  // === Fees =============================================
 
   /**
-   * Iznosi kotizacija i pravilo o besplatnim disciplinama.
-   *
-   * Kao i mere za diplome, ovo je osobina **saveza, ne takmičenja**: cenovnik
-   * se donosi jednom i važi dok se ne promeni.
+   * Fee amounts and the free-discipline rule. Like the diploma measures,
+   * a property of the federation, not the competition.
    */
   async fees() {
     const row = await metaGet('fees', null);
@@ -1600,13 +1543,12 @@ export const store = {
     });
   },
 
-  // ── Sezone i rang liste ──────────────────────────────────────────────
+  // === Seasons and rankings =============================================
 
   /**
-   * Sve sezone — otvorena prva, pa zatvorene od najskorije. Otvorena sezona
-   * počinje tamo gde se prethodna završila; ako nijedna nije zatvorena,
-   * počinje od najstarijeg takmičenja u bazi, jer bi svaki drugi datum
-   * proizvoljno isekao istoriju koju urednik nije tražio da se iseče.
+   * All seasons — the open one first, then closed ones, most recent
+   * first. The open season starts where the previous ended; with none
+   * closed, it starts at the oldest competition in the database.
    */
   async listSeasons() {
     const [closed, start, competitions] = await Promise.all([
@@ -1634,13 +1576,10 @@ export const store = {
   },
 
   /**
-   * Zatvara sezonu i otvara sledeću od sutradan. Ime i oba datuma dolaze
-   * spolja — urednik ih potvrđuje ili menja pri zatvaranju.
-   *
-   * Povratno je, kao i svaka druga promena stanja u aplikaciji: `reopenSeason`
-   * vraća sezonu u rad. Ništa se pri zatvaranju ne prepisuje niti zamrzava,
-   * pa ispravka koja stigne posle zatvaranja nije izgubljena — sezona se
-   * otvori, ispravi i ponovo zatvori.
+   * Closes the season and opens the next from the following day. Name
+   * and dates come from outside — the editor confirms or changes them.
+   * Reversible like every state change: reopenSeason puts it back to
+   * work, and nothing is copied or frozen on close.
    */
   async closeSeason({ name, from, to }) {
     const closed = await metaGet('seasons', []);
@@ -1656,7 +1595,7 @@ export const store = {
     return season;
   },
 
-  /** Vraća poslednju zatvorenu sezonu u rad — otvorena sezona je opet spaja. */
+  /** Puts the last closed season back to work; the open one absorbs it. */
   async reopenSeason(id) {
     const closed = await metaGet('seasons', []);
     const season = closed.find((x) => x.id === id) || closed[closed.length - 1];
@@ -1667,16 +1606,11 @@ export const store = {
   },
 
   /**
-   * Rang liste jedne sezone: jedna za klubove i po jedna za svaku uzrasnu
-   * grupu podeljenu na muškarce i žene.
-   *
-   * Bodovi se sabiraju **po licu**, ne po nastupu: isti čovek na tri
-   * takmičenja u sezoni je jedan red sa zbirom. Klub i uzrasna grupa se
-   * uzimaju sa **poslednjeg** nastupa u sezoni, jer je to stanje sa kojim
-   * sezonu završava; ako je usput promenio klub, red to i kaže.
-   *
-   * U listu ulaze svi koji su nastupali, i oni bez ijednog boda — lista je
-   * ujedno i spisak svih koji su se te sezone takmičili u toj kategoriji.
+   * One season's rankings: one list for clubs, one per age group split
+   * by sex. Points sum per person, not per appearance; club and group
+   * come from the last appearance in the season, and a mid-season club
+   * change is marked. Everyone who competed is on the list, points or
+   * not.
    */
   async rankings(season) {
     const [competitions, competitors, entries, results, teams, register] = await Promise.all([
@@ -1687,8 +1621,8 @@ export const store = {
     const inside = competitions.filter((c) => inSeason(c.date, season))
       .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     const ids = new Set(inside.map((c) => c.id));
-    // Rang lista je zbir A liste. Takmičenje sa B liste ostaje u sezoni i
-    // vidi se u kalendaru, ali nijedan njegov plasman ne pomera poredak.
+    // Rankings sum the A list. A B-list competition stays in the season
+    // and the calendar, but none of its placements move the order.
     const scoring = new Set(inside.filter(pointsCounted).map((c) => c.id));
     const dateOf = new Map(inside.map((c) => [c.id, c.date || '']));
 
@@ -1707,7 +1641,7 @@ export const store = {
       if (scores) row.bodovi += pointsFor(placement);
     };
 
-    // ── Takmičari ──────────────────────────────────────────────────────
+    // === Competitors =============================================
     const people = new Map();
     mine.forEach((c) => {
       if (!c.personId) return;
@@ -1722,7 +1656,7 @@ export const store = {
       const row = people.get(c.personId);
       row.nastupa += 1;
       if (c.club) row.clubs.add(c.club);
-      // Poslednji nastup u sezoni nosi klub, pojas i grupu.
+      // The last appearance in the season carries club, belt and group.
       const date = dateOf.get(c.competitionId) || '';
       if (date >= row.lastDate) {
         Object.assign(row, {
@@ -1732,7 +1666,7 @@ export const store = {
       }
     });
 
-    // ── Klubovi ────────────────────────────────────────────────────────
+    // === Clubs =============================================
     const clubs = new Map();
     const clubOf = (name) => {
       if (!clubs.has(name)) {
@@ -1752,9 +1686,9 @@ export const store = {
       if (!ids.has(r.competitionId)) return;
       const scores = scoring.has(r.competitionId);
 
-      // Ekipni plasman: klub jednom, a svaki član pune bodove na svoj red.
-      // Član koji te sezone nije nastupao pojedinačno dobija red ovde — u
-      // rang listi mora da postoji, inače bi mu ekipni bodovi propali.
+      // A team placement: the club once, every member full points. A
+      // member with no individual appearance this season gets their row
+      // here — they must exist or their team points would be lost.
       const team = teamOf(r, teamById);
       if (team) {
         if (team.club) score(clubOf(team.club), r.placement, scores);
@@ -1780,7 +1714,7 @@ export const store = {
       const competitor = entry && competitorById.get(entry.competitorId);
       const person = r.personId && people.get(r.personId);
       if (person) score(person, r.placement, scores);
-      // Medalja pripada klubu za koji se tog dana nastupalo, ne današnjem.
+      // The medal belongs to the club represented that day, not today's.
       const name = competitor?.club || entry?.club;
       if (name) score(clubOf(name), r.placement, scores);
     });
@@ -1789,7 +1723,7 @@ export const store = {
       || b.zlato - a.zlato || b.srebro - a.srebro
       || a.name.localeCompare(b.name, 'sr');
 
-    /** Deljeno mesto: isti bodovi — isto mesto, pa preskok (1, 2, 2, 4). */
+    /** Shared place: same points, same place, then a skip (1, 2, 2, 4). */
     const place = (rows) => {
       let last = null, lastPlace = 0;
       rows.forEach((row, i) => {
@@ -1804,7 +1738,7 @@ export const store = {
       .map((c) => ({ ...c, people: c.people.size, personIds: [...c.people] }))
       .sort(byScore));
 
-    // ── Po uzrasnoj grupi i polu ───────────────────────────────────────
+    // === Per age group and sex =============================================
     const groups = [];
     AGES.forEach((age) => {
       ['M', 'Ž'].forEach((sex) => {
@@ -1828,8 +1762,8 @@ export const store = {
       season,
       competitions: inside,
       scoring: inside.filter(pointsCounted),
-      // Takmičenja koja bi nosila bodove da su zatvorena. Rang lista mora da
-      // kaže da ih čeka — inače tiho prikazuje manje nego što stvarno jeste.
+      // Competitions that would carry points once closed. The list must
+      // say it is waiting for them, or it quietly under-reports.
       pending: inside.filter((c) => calendarOf(c) === 'A' && !pointsCounted(c)),
       clubs: clubList,
       groups,
@@ -1845,8 +1779,9 @@ export const store = {
 };
 
 /**
- * Lica bez ijednog nastupa — briše ih se posle brisanja takmičenja.
- * Nastup je i članstvo u ekipi: ko postoji samo kao član, postoji.
+ * People with no appearance anywhere — pruned after a competition is
+ * deleted. Team membership is an appearance too: whoever exists only as
+ * a member, exists.
  */
 async function pruneOrphanPeople() {
   const [people, competitors, teams] = await Promise.all([
