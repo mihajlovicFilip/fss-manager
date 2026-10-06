@@ -395,6 +395,8 @@ The header stays at the top while the list scrolls — `.page-body` is the eleme
 .grid tbody tr.is-active { box-shadow: inset 3px 0 0 var(--color-accent); }
 .grid .col-name { font-size: 13px; font-weight: 500; color: var(--color-text); }
 .grid .col-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* FSS ID: read and copied by coaches, so it never breaks across lines. */
+.grid .col-id { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .grid .col-actions { text-align: right; white-space: nowrap; }
 .grid .col-actions .link-cell + .link-cell { margin-left: 12px; }
 
@@ -616,6 +618,8 @@ result entery
   line-height: 1.5;
   color: var(--color-neutral-600);
 }
+/* A note under the title, before the fields — the FSS ID in a correction. */
+.modal-note.is-lead { margin: -6px 0 16px; }
 
 
 /*=============================================================================
@@ -1319,6 +1323,8 @@ entery list import
 .import-grid tr.is-bad .col-name { color: var(--color-neutral-800); }
 .import-grid .is-ok { color: var(--color-neutral-600); }
 .import-grid .is-bad-cell { color: #8a2a2a; font-weight: 500; }
+/* Imports, but with a word about its FSS ID. */
+.import-grid .is-note { color: #7a5200; }
 
 input[type="file"].control { height: auto; padding: 5px 8px; font-size: 12px; background: none; }
 a.btn-app { display: inline-flex; align-items: center; text-decoration: none; }

@@ -128,6 +128,19 @@ def no_digits(cell):
     return f'AND({checks})'
 
 
+def fss_format(cell):
+    """
+    True when the cell reads FSS-<number>/<two digits>, the way the
+    federation's list prints it. Only the shape is checked — whose ID it
+    is, the app checks on import. IFERROR because Excel's AND does not
+    stop at the first FALSE, and VALUE of a non-number is an error.
+    """
+    number = f'MID({cell},5,LEN({cell})-7)'
+    return (f'IFERROR(AND(UPPER(LEFT({cell},4))="FSS-",MID({cell},LEN({cell})-2,1)="/",'
+            f'ISNUMBER(VALUE(RIGHT({cell},2))),VALUE({number})>=1,'
+            f'VALUE({number})=INT(VALUE({number}))),FALSE)')
+
+
 def group_formula(birth_year):
     return f'IF({birth_year}="","",LOOKUP({birth_year},INDEX(grupe,0,1),INDEX(grupe,0,2)))'
 
@@ -253,14 +266,17 @@ def sheet_individual(wb, p, s):
     K_GOD, K_IME, K_POL, K_POJAS, K_GRUPA, K_UZRAST = range(6)
     K_DISC = 6
     K_KILAZA = K_DISC + n_disc
-    K_PROVERA = K_KILAZA + 1
+    # The FSS ID goes after everything else that is typed, so the columns
+    # before it — and every formula that names them — stay where they were.
+    K_FSS = K_KILAZA + 1
+    K_PROVERA = K_FSS + 1
     K_POMOC_D = K_PROVERA + 1
     K_POMOC_K = K_PROVERA + 2
 
     kolone = [('Godište', 10), ('Ime i prezime', 26), ('Pol', 10), ('Pojas', 11),
               ('Grupa', 8), ('Uzrast', 16)]
     kolone += [(f'Disciplina {i + 1}', 20) for i in range(n_disc)]
-    kolone += [('Telesna težina', 12), ('Provera', 34)]
+    kolone += [('Telesna težina', 12), ('FSS ID', 13), ('Provera', 34)]
     for i, (naslov, sirina) in enumerate(kolone):
         ws.set_column(i, i, sirina)
     ws.set_column(K_POMOC_D, K_POMOC_K, 14, None, {'hidden': True})
@@ -271,13 +287,15 @@ def sheet_individual(wb, p, s):
     ws.write(1, 0, 'Fudokan savez Srbije · popunjava klub i dostavlja savezu · '
                    f'takmičarska sezona {p["sezona"]}. · '
                    f'izdanje {datetime.date.today().strftime("%d.%m.%Y.")}', s['sitno'])
-    ws.set_row(2, 28)
+    ws.set_row(2, 40)
     ws.merge_range(2, 0, 2, K_PROVERA, (
         'Unos počinje godištem: uzrasna grupa i naziv uzrasta popunjavaju se automatski, '
         'a padajući meni nudi discipline koje su moguće u odnosu na uzrast. Telesna težina '
         'unosi se isključivo uz Fudokan sport kumite, budući da je tradicionalni kumite '
-        'apsolutna kategorija. Kolona „Provera" služi za proveru kompletnosti prijave. '
-        'Ekipne prijave se unose na listu „Ekipno".'),
+        'apsolutna kategorija. U kolonu „FSS ID" upisuje se ID takmičara sa spiska saveza — '
+        f'za {p["sezona"]}. godinu, a dok ga takmičar nema, prošlogodišnji; takmičar koji '
+        'nastupa prvi put ostaje bez ID-a, nov ID dodeljuje savez. Kolona „Provera" služi za '
+        'proveru kompletnosti prijave. Ekipne prijave se unose na listu „Ekipno".'),
         s['uputstvo'])
 
     for red, ime, napomena in ((3, 'Klub', 'pun naziv kluba, onako kako se navodi u rezultatima'),
@@ -297,18 +315,22 @@ def sheet_individual(wb, p, s):
     prvi, posl = ZAGLAVLJE + 1, ZAGLAVLJE + ROWS
     disc_od, disc_do = column_letter(K_DISC), column_letter(K_DISC + n_disc - 1)
     kg, pomoc_d, pomoc_k = column_letter(K_KILAZA), column_letter(K_POMOC_D), column_letter(K_POMOC_K)
+    fss = column_letter(K_FSS)
+    primer = f'FSS-12/{p["sezona"] % 100:02d}'
 
     for r in range(prvi, posl + 1):
         e = r + 1                      # the row number as Excel sees it
-        for c in [K_GOD, K_IME, K_POL, K_POJAS] + list(range(K_DISC, K_KILAZA + 1)):
+        for c in [K_GOD, K_IME, K_POL, K_POJAS] + list(range(K_DISC, K_FSS + 1)):
             ws.write_blank(r, c, None, s['unos'])
 
         ws.write_formula(r, K_GRUPA, f'={group_formula(f"$A{e}")}', s['izvedeno'], '')
         ws.write_formula(r, K_UZRAST, f'={age_name_formula(f"$E{e}")}', s['izvedeno'], '')
 
         disc = f'{disc_od}{e}:{disc_do}{e}'
+        # A row with only an ID is not empty: the ID does not replace the
+        # name and the rest, the app still needs them all.
         ws.write_formula(r, K_PROVERA, (
-            f'=IF(COUNTA($A{e}:$D{e},{disc})=0,"",'
+            f'=IF(COUNTA($A{e}:$D{e},{disc},{fss}{e})=0,"",'
             f'IF($A{e}="","Nedostaje godište",'
             f'IF($E{e}="","Godište nije obuhvaćeno uzrasnom tabelom",'
             f'IF($B{e}="","Nedostaje ime i prezime",'
@@ -324,7 +346,9 @@ def sheet_individual(wb, p, s):
             f'"Nedostaje telesna težina za Fudokan sport kumite",'
             f'IF(AND(COUNTIF({disc},"Fudokan sport kumite")=0,{kg}{e}<>""),'
             f'"Telesna težina se unosi isključivo uz Fudokan sport kumite",'
-            f'"prijava je kompletna")))))))))))'), s['provera'], '')
+            f'IF(AND({fss}{e}<>"",NOT({fss_format(f"{fss}{e}")})),'
+            f'"FSS ID se upisuje u obliku {primer}",'
+            f'"prijava je kompletna"))))))))))))'), s['provera'], '')
 
         # The named range the menu fills from. The whole calculation
         # sits here in a cell, so the validation rule stays simplest.

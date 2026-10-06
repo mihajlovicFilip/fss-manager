@@ -14,6 +14,7 @@ import {
   placementByKey, placementSlots, pointsFor, calendarOf, teamCategoryLabel, teamSizeLabel,
   seasonOf, yearsLabel, DIPLOMA_LINES, DIPLOMA_DEFAULT, entriesOpen, pointsCounted,
   BELTS, CLUBS, WEIGHTS, groupOfYear, levelOfBelt, FEES_DEFAULT,
+  FSS_ID_SINCE, fssIdOf, fssHistory,
 } from './data.js';
 import { store } from './store.js';
 import { cell, col, boardCard, slipLine, uniqueCount, bracketHtml } from './doc-render.js';
@@ -366,11 +367,12 @@ function competitorsHtml({ competition, registry, tally }) {
       const mine = entriesByCompetitor.get(c.id) || [];
       const age = ageByCode(c.group);
       return `
-      <tr data-print-id="${esc(c.id)}" data-search="${esc((c.name + ' ' + c.club).toLowerCase())}">
+      <tr data-print-id="${esc(c.id)}" data-search="${esc([c.name, c.club, c.fssId || ''].join(' ').toLowerCase())}">
         <td class="col-num">${i + 1}</td>
         <td class="col-name">
           <button type="button" class="link-cell" data-person="${esc(c.personId)}">${esc(c.name)}</button>
         </td>
+        <td class="col-id">${c.fssId ? esc(c.fssId) : '<span class="text-muted">—</span>'}</td>
         <td>${esc(c.club)}</td>
         <td title="${esc(age ? age.name : '')}">${esc(c.group)}</td>
         <td class="col-num">${esc(c.year)}</td>
@@ -391,7 +393,7 @@ function competitorsHtml({ competition, registry, tally }) {
     ${notice}${frozen}
     <div class="list-tools">
       <input class="control search" id="competitor-search" type="search"
-             placeholder="Pretraga po imenu ili klubu" aria-label="Pretraga takmičara">
+             placeholder="Pretraga po imenu, klubu ili FSS ID-u" aria-label="Pretraga takmičara">
       <span class="list-count" id="competitor-count">${registry.competitors.length} ${plural(registry.competitors.length, 'takmičar', 'takmičara', 'takmičara')}</span>
       ${open ? '<button type="button" class="btn-app is-quiet" data-new-entry>+ Nova prijava</button>' : ''}
     </div>
@@ -400,6 +402,7 @@ function competitorsHtml({ competition, registry, tally }) {
         <tr>
           <th class="col-num">#</th>
           <th>Ime i prezime</th>
+          <th title="Godišnji ID takmičara za ${esc(seasonOf(competition))}. godinu">FSS ID</th>
           <th>Klub</th>
           <th title="Uzrasna grupa">Grupa</th>
           <th class="col-num">Godište</th>
@@ -439,6 +442,10 @@ function competitorsHtml({ competition, registry, tally }) {
         <i class="mark tl" aria-hidden="true">+</i><i class="mark tr" aria-hidden="true">+</i>
         <i class="mark bl" aria-hidden="true">+</i><i class="mark br" aria-hidden="true">+</i>
         <h2 class="modal-title">${isNew ? 'Nova prijava' : 'Ispravka prijave'}</h2>
+        ${season >= FSS_ID_SINCE ? `
+        <p class="modal-note is-lead">FSS ID za ${season}: ${isNew
+    ? 'dodeljuje se pri upisu'
+    : `<b>${esc(competitor.fssId || '—')}</b> — ID se ne menja ručno`}</p>` : ''}
 
         <div class="form-grid">
           <div class="field-row">
@@ -575,6 +582,7 @@ function competitorsHtml({ competition, registry, tally }) {
         const ona = patch.sex === 'Ž';
         toast([
           `${ime} — ${ona ? 'upisana' : 'upisan'}, uzrast ${done.group}`,
+          done.fssId ? `FSS ID ${done.fssId}` : '',
           `${done.entries} ${plural(done.entries, 'disciplina', 'discipline', 'disciplina')}`,
           done.elsewhere ? 'isto ime i godište postoji pod drugim klubom — upisan kao nov takmičar'
             : (done.known ? `${ona ? 'prepoznata' : 'prepoznat'} iz ranijih takmičenja` : ''),
@@ -587,7 +595,8 @@ function competitorsHtml({ competition, registry, tally }) {
           done.added ? `${done.added} ${plural(done.added, 'disciplina dodata', 'discipline dodate', 'disciplina dodato')}` : '',
           done.removed ? `${done.removed} ${plural(done.removed, 'uklonjena', 'uklonjene', 'uklonjeno')}` : '',
           done.teams ? `ispravljeno i u ${done.teams} ${plural(done.teams, 'ekipi', 'ekipe', 'ekipa')}` : '',
-          done.merged ? 'spojeno sa licem koje već postoji u bazi' : '',
+          done.merged ? `spojeno sa licem koje već postoji u bazi${
+            done.fssId ? `, važeći FSS ID ${done.fssId}` : ''}` : '',
         ].filter(Boolean).join(' · ') + '.');
       }
       render();
@@ -628,6 +637,8 @@ function competitorsHtml({ competition, registry, tally }) {
 function careerModal({ person, career }) {
   const blank = { zlato: 0, srebro: 0, bronza: 0, ucesce: 0, medalje: 0, bodovi: 0 };
   const grand = { ...blank };
+  // One ID per year, the newest first — last year's stays as history.
+  const ids = fssHistory(person);
 
   const sections = career.map(({ competition, competitor, entries }) => {
     const tally = { ...blank };
@@ -658,7 +669,8 @@ function careerModal({ person, career }) {
             <div class="career-name">${esc(competition.name)}</div>
             <div class="career-meta">
               ${esc(dateLabel(competition.date))} · ${esc(competition.place)} ·
-              ${esc(competitor.club)} · ${esc(competitor.belt)} pojas
+              ${esc(competitor.club)} · ${esc(competitor.belt)} pojas${
+  fssIdOf(person, seasonOf(competition)) ? ` · ${esc(fssIdOf(person, seasonOf(competition)))}` : ''}
             </div>
           </div>
           <div class="career-score">
@@ -699,6 +711,9 @@ function careerModal({ person, career }) {
           ${esc(person.year)}. godište · ${esc(person.sex === 'M' ? 'muški' : 'ženski')}
           ${person.licence ? ' · licenca ' + esc(person.licence) : ''}
         </p>
+        ${ids.length ? `
+        <p class="modal-body career-ids">FSS ID po godinama: ${ids.map((x) => `
+          <span>${esc(x.year)} — <b>${esc(x.id)}</b></span>`).join(' · ')}</p>` : ''}
         ${summary}
         <div class="career-list">${sections}</div>
         <div class="modal-actions">
@@ -2011,9 +2026,12 @@ const resetImport = () => { importState = { files: [], read: [], done: null }; }
  */
 async function readImportFiles(competition) {
   const season = seasonOf(competition);
+  // Who holds which FSS ID — so an ID that belongs to somebody else is
+  // caught here, before the import, with its Excel row number.
+  const owners = await store.fssOwners();
   importState.read = [];
   for (const file of importState.files) {
-    const read = await readEntryFile(file, season);
+    const read = await readEntryFile(file, season, owners);
     importState.read.push({
       fileName: file.name,
       payload: read.payload || null,
@@ -2089,13 +2107,28 @@ function importHtml({ competitions, activeId }) {
         <div><dt>Novi takmičari</dt><dd>${s.done.competitors}</dd></div>
         <div><dt>Nove ekipe</dt><dd>${s.done.teams}</dd></div>
         <div><dt>Već upisano ranije</dt><dd>${s.done.skipped + s.done.teamsSkipped}</dd></div>
+        <div><dt>Prepoznato po FSS ID-u</dt><dd>${s.done.recognized}</dd></div>
+        <div><dt>Novih FSS ID-eva</dt><dd>${s.done.granted}</dd></div>
       </dl>
-      ${s.done.transfers?.length ? `
+      ${s.done.rejected.length ? `
+      <p class="pf-warn">${s.done.rejected.length} ${plural(s.done.rejected.length,
+    'red nije uvezen', 'reda nisu uvezena', 'redova nije uvezeno')} zbog FSS ID-a:
+        ${s.done.rejected.map((n) => `
+        <b>${esc(n.club)}, red ${esc(n.row)}</b> ${esc(n.name)} (${esc(n.message)})`).join('; ')}.
+        Klub treba da proveri ID ili ime.</p>` : ''}
+      ${s.done.moved.length ? `
+      <p class="pf-note">Prelazak u drugi klub, prepoznat po FSS ID-u — ID i bodovi idu
+        za takmičarem: ${s.done.moved.map((n) => `
+        <b>${esc(n.name)}</b> (${esc(n.id)}, ${esc(n.from)} → ${esc(n.to)})`).join(', ')}.</p>` : ''}
+      ${s.done.transfers.length ? `
       <p class="pf-note">Isto ime i godište već postoji pod drugim klubom, pa su
         ovde upisani kao novi takmičari: ${s.done.transfers.map((n) => `
         <b>${esc(n.name)}</b> (${esc(n.year)}, ${esc(n.from)} → ${esc(n.to)})`).join(', ')}.
         Ako je imenjak — sve je kako treba. Ako je isti čovek koji je prešao klub,
-        bodovi mu kreću od nule.</p>` : ''}
+        bodovi mu kreću od nule; sa FSS ID-em u formularu bio bi prepoznat.</p>` : ''}
+      ${s.done.notes.length ? `
+      <p class="pf-note">FSS ID: ${s.done.notes.map((n) => `
+        <b>${esc(n.club)}, red ${esc(n.row)}</b> ${esc(n.name)} — ${esc(n.message)}`).join('; ')}.</p>` : ''}
     </section>` : ''}`;
 }
 
@@ -2178,7 +2211,7 @@ function importFileBlock(r, target) {
  */
 function importRows(rows, kind) {
   const columns = kind === 'solo'
-    ? [['Red', 'num'], ['Ime i prezime', 'name'], ['Pol', 'num'], ['Godište', 'num'],
+    ? [['Red', 'num'], ['Ime i prezime', 'name'], ['FSS ID', ''], ['Pol', 'num'], ['Godište', 'num'],
       ['Grupa', 'num'], ['Pojas', ''], ['Discipline', ''], ['Stanje', '']]
     : [['Red', 'num'], ['Ekipna disciplina', 'name'], ['Vrsta', ''], ['Grupa', 'num'],
       ['Sastav', 'num'], ['Članovi', ''], ['Stanje', '']];
@@ -2187,10 +2220,12 @@ function importRows(rows, kind) {
     const ok = !r.problem;
     let cells;
     if (!ok) {
-      cells = [r.excelRow, r.raw, ...Array(columns.length - 3).fill('')];
+      cells = kind === 'solo'
+        ? [r.excelRow, r.raw, r.fss || '', ...Array(columns.length - 4).fill('')]
+        : [r.excelRow, r.raw, ...Array(columns.length - 3).fill('')];
     } else if (kind === 'solo') {
       const c = r.competitor;
-      cells = [r.excelRow, c.name, c.sex, c.year, c.group, c.belt,
+      cells = [r.excelRow, c.name, r.fss || '', c.sex, c.year, c.group, c.belt,
         c.disciplines.map((d) => (d.weight ? `${d.name} (${weightLabel(d.weight)})` : d.name)).join(' · ')];
     } else {
       const x = r.team;
@@ -2205,7 +2240,8 @@ function importRows(rows, kind) {
     const cls = columns[i][1];
     return `<td class="${cls === 'num' ? 'col-num' : cls === 'name' ? 'col-name' : ''}">${esc(v)}</td>`;
   }).join('')}
-        <td class="${ok ? 'is-ok' : 'is-bad-cell'}">${ok ? 'kompletno' : esc(r.problem)}</td>
+        <td class="${ok ? (r.fssNote ? 'is-note' : 'is-ok') : 'is-bad-cell'}">${
+  ok ? `kompletno${r.fssNote ? ` · ${esc(r.fssNote)}` : ''}` : esc(r.problem)}</td>
       </tr>`;
   }).join('');
 
@@ -2913,7 +2949,7 @@ function competitorsSpec({ competition, registry, tally }) {
   const search = document.getElementById('competitor-search')?.value.trim() || '';
 
   return {
-    // Trinaest kolona ne stane uspravno a da se imena ne prelome.
+    // Fourteen columns do not fit upright without names breaking.
     orientation: 'landscape',
     context: competitionContext(competition),
     spec: {
@@ -2924,7 +2960,7 @@ function competitorsSpec({ competition, registry, tally }) {
         calendarOf(competition) === 'B' ? ' · B lista — bez bodovanja' : ''}`,
       docCode: 'Spisak takmičara',
       columns: [
-        col('#', '26px', 'center'), col('Ime i prezime'), col('Klub'),
+        col('#', '26px', 'center'), col('Ime i prezime'), col('FSS ID', '74px'), col('Klub'),
         col('Grupa', '46px', 'center'), col('God.', '44px', 'center'), col('Pojas', '54px'),
         col('Prijave', '50px', 'center'), col('Zlato', '46px', 'center'),
         col('Srebro', '48px', 'center'), col('Bronza', '48px', 'center'),
@@ -2937,7 +2973,7 @@ function competitorsSpec({ competition, registry, tally }) {
         return {
           zebra: i % 2 === 1,
           cells: [
-            cell(i + 1, 'center'), cell(c.name, 'left', true), cell(c.club),
+            cell(i + 1, 'center'), cell(c.name, 'left', true), cell(c.fssId || '—'), cell(c.club),
             cell(c.group, 'center'), cell(c.year, 'center'), cell(c.belt),
             numCell(perCompetitor.get(c.id) || 0),
             numCell(here.zlato), numCell(here.srebro), numCell(here.bronza), numCell(here.ucesce),
@@ -3994,17 +4030,22 @@ document.addEventListener('click', async (event) => {
     // both enter the same person do not create two records.
     const zbir = {
       files: 0, competitors: 0, entries: 0, teams: 0, skipped: 0, teamsSkipped: 0,
-      transfers: [],
+      granted: 0, recognized: 0, transfers: [], moved: [], rejected: [], notes: [],
     };
     try {
       for (const r of fajlovi) {
         const done = await store.importClubEntry(target, r.payload);
         zbir.files += 1;
-        ['competitors', 'entries', 'teams', 'skipped', 'teamsSkipped']
+        ['competitors', 'entries', 'teams', 'skipped', 'teamsSkipped', 'granted', 'recognized']
           .forEach((k) => { zbir[k] += done[k]; });
         // These are named, not counted — the editor decides for each
         // whether it is a namesake or a club change.
-        done.transfers.forEach((n) => zbir.transfers.push(n));
+        done.transfers.forEach((n) => (n.recognized ? zbir.moved : zbir.transfers).push(n));
+        // Rows are named with their club and Excel row — that is what the
+        // club is told.
+        const club = r.payload.club;
+        done.rejected.forEach((n) => zbir.rejected.push({ ...n, club }));
+        done.notes.forEach((n) => zbir.notes.push({ ...n, club }));
       }
       const into = await store.getCompetition(target);
       importState.done = { ...zbir, competition: into?.name || '' };
@@ -4012,7 +4053,9 @@ document.addEventListener('click', async (event) => {
         + `${zbir.entries} ${plural(zbir.entries, 'prijava', 'prijave', 'prijava')}`
         + `, ${zbir.teams} ${plural(zbir.teams, 'ekipa', 'ekipe', 'ekipa')}`
         + (zbir.skipped + zbir.teamsSkipped
-          ? ` · preskočeno već upisanih: ${zbir.skipped + zbir.teamsSkipped}` : ''));
+          ? ` · preskočeno već upisanih: ${zbir.skipped + zbir.teamsSkipped}` : '')
+        + (zbir.granted ? ` · novih FSS ID-eva: ${zbir.granted}` : '')
+        + (zbir.rejected.length ? ` · nije uvezeno zbog FSS ID-a: ${zbir.rejected.length}` : ''));
     } catch (err) {
       importState.done = null;
       toast(`Uvoz je prekinut: ${err.message}`);

@@ -16,7 +16,11 @@
  *      no request leaving the local server.
  *   3. The numbers agree: dashboard equals database equals fixture.
  *   4. Importing the same file twice changes nothing.
- *   5. Every document type prints to PDF with nothing clipped.
+ *   5. FSS IDs: numbering from 1 without gaps, IDs on the form (own,
+ *      somebody else's, malformed, unknown), a transfer, the turn of the
+ *      year, deletion, merging, the database refusing a duplicate, a form
+ *      from before the ID column, and the ID on screen.
+ *   6. Every document type prints to PDF with nothing clipped.
  *
  * Needs Node 22+ (built-in WebSocket for CDP), python3 and Chrome.
  * Nothing is installed: the zip goes through zlib, Chrome is driven
@@ -269,8 +273,18 @@ function buildFixture(d, season, competitionName) {
   };
 }
 
-/** Writes the fixture into a copy of the real form. */
-function fillForm(fixture, outPath) {
+/** Columns of the "Prijava" sheet the fixture writes besides A–D and the disciplines. */
+const COL_WEIGHT = 'O';
+const COL_FSS = 'P';
+
+/**
+ * Writes the fixture into a copy of the real form. A fixture may name its
+ * own club and give rows an FSS ID; `withoutFssColumn` blanks that
+ * column's header, which makes the copy read like a form from before the
+ * column existed.
+ */
+function fillForm(fixture, outPath, { withoutFssColumn = false } = {}) {
+  const club = fixture.club || CLUB;
   const entries = readZip(fs.readFileSync(path.join(ROOT, 'form', 'FSS-Entry-Form.xlsx')));
   const byName = new Map(entries.map((e) => [e.name, e]));
 
@@ -289,10 +303,15 @@ function fillForm(fixture, outPath) {
   // The "Prijava" sheet: header (B4–B7), then a row per competitor from row 11.
   const soloPath = target('Prijava');
   let solo = inflate(byName.get(soloPath)).toString();
-  solo = withCells(solo, 4, [strCell('B4', CLUB.name)]);
-  solo = withCells(solo, 5, [strCell('B5', CLUB.city)]);
-  solo = withCells(solo, 6, [strCell('B6', CLUB.coach)]);
+  solo = withCells(solo, 4, [strCell('B4', club.name)]);
+  solo = withCells(solo, 5, [strCell('B5', club.city)]);
+  solo = withCells(solo, 6, [strCell('B6', club.coach)]);
   solo = withCells(solo, 7, [strCell('B7', fixture.competitionName)]);
+  if (withoutFssColumn) {
+    const header = new RegExp(`<c r="${COL_FSS}10"([^>]*?) t="s"([^>]*)>[\\s\\S]*?</c>`);
+    if (!header.test(solo)) fail(`U formularu nema naslova kolone FSS ID u ${COL_FSS}10.`);
+    solo = solo.replace(header, `<c r="${COL_FSS}10"$1$2/>`);
+  }
   fixture.people.forEach((p, i) => {
     const r = 11 + i;
     const cells = [
@@ -302,7 +321,8 @@ function fillForm(fixture, outPath) {
       strCell(`D${r}`, p.belt),
       ...p.disciplines.map((name, n) => strCell(`${colLetter(6 + n)}${r}`, name)),
     ];
-    if (p.weight) cells.push(strCell(`O${r}`, p.weight));
+    if (p.weight) cells.push(strCell(`${COL_WEIGHT}${r}`, p.weight));
+    if (p.fss) cells.push(strCell(`${COL_FSS}${r}`, p.fss));
     solo = withCells(solo, r, cells);
   });
 
@@ -428,6 +448,20 @@ async function main() {
   const fixture = buildFixture(d, season, competitionName);
   pass(`fikstura za sezonu ${season}: ${fixture.people.length} takmičara, `
     + `${fixture.entries} prijava, ${fixture.team ? 1 : 0} ekipa`);
+
+  // The FSS ID rules on their own, before anything runs.
+  {
+    const valid = ['FSS-1/26', 'FSS-357/26', ' fss-12/26 '];
+    const invalid = ['FSS-0/26', 'FSS-A/26', 'FSS-10', '10/26', 'FSS-12/2026', ''];
+    valid.forEach((v) => { if (!d.parseFssId(v)) fail(`„${v}" bi morao biti ispravan FSS ID.`); });
+    invalid.forEach((v) => { if (d.parseFssId(v)) fail(`„${v}" ne sme biti prihvaćen kao FSS ID.`); });
+    const next = (ids, year, top) => d.nextFssNumber(ids, year, top);
+    if (next(['FSS-1/26', 'FSS-2/26', 'FSS-4/26'], 2026) !== 5) fail('Posle 1, 2 i 4 sledeći mora biti 5.');
+    if (next(['FSS-352/26'], 2026) !== 353) fail('Posle 352 sledeći mora biti 353.');
+    if (next(['FSS-199/26'], 2026, 200) !== 201) fail('Obrisani 200 se ne sme ponoviti.');
+    if (next(['FSS-1/26', 'FSS-9/26'], 2027) !== 1) fail('Nova godina mora početi od 1.');
+    pass('pravila FSS ID-a: oblik, 1·2·4 → 5, 352 → 353, obrisani se ne ponavlja, nova godina od 1');
+  }
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fss-check-'));
   const formPath = path.join(tmp, 'KK-Provera.xlsx');
@@ -563,6 +597,76 @@ async function main() {
       return { competitors: r.competitors.length, entries: r.entries.length, teams: r.teams.length };
     })()`);
 
+    // === FSS ID helpers =============================================
+    const inStore = (body) => js(`(async () => {
+      const { store } = await import('./assets/js/store.js');
+      ${body}
+    })()`);
+
+    const fssPeople = () => inStore(`return (await store.listPeople()).map((p) => ({
+      id: p.id, name: p.name, year: p.year, club: p.club, identity: p.identity,
+      aliases: p.aliases || [], fssIds: p.fssIds || [] }));`);
+
+    /** Every ID held once, nobody with two IDs in one year. */
+    const fssInvariants = (people, label) => {
+      const holder = new Map();
+      people.forEach((p) => {
+        const years = new Set();
+        p.fssIds.forEach((id) => {
+          if (holder.has(id)) fail(`${label}: ${id} imaju dvojica (${holder.get(id)} i ${p.name}).`);
+          holder.set(id, p.name);
+          const year = d.parseFssId(id)?.year;
+          if (!year) fail(`${label}: ${p.name} nosi neispravan ID „${id}".`);
+          if (years.has(year)) fail(`${label}: ${p.name} ima dva ID-a za ${year}.`);
+          years.add(year);
+        });
+      });
+      return holder.size;
+    };
+    const personNamed = (people, name) => {
+      const found = people.filter((p) => p.name === name);
+      if (found.length !== 1) fail(`U bazi ${found.length} osoba „${name}" — očekuje se jedna.`);
+      return found[0];
+    };
+    const numbersOf = (people, year) => people
+      .flatMap((p) => p.fssIds.map((id) => d.parseFssId(id)))
+      .filter((x) => x && x.year === year).map((x) => x.number);
+
+    const createCompetition = (name, date) => inStore(`
+      const c = await store.createCompetition({ name: ${JSON.stringify(name)}, date: '${date}',
+        place: 'Proverovac', level: 'Klupski turnir', calendar: 'B', description: '' });
+      await store.setCompetitionStatus(c.id, 'Prijave otvorene');
+      return c.id;`);
+
+    /**
+     * One form through the import screen, as the editor does it: pick the
+     * competition, pick the file, read the preview, import. Returns the
+     * preview's rejected rows, the toast and the report card.
+     */
+    const importForm = async (formPath, competitionId) => {
+      await js('location.hash = "uvoz"');
+      await until('ekran uvoza', '!!document.getElementById("import-target")');
+      await js('document.querySelector("[data-import-clear]")?.click()');
+      await until('prazan uvoz', '!document.querySelector("[data-import-run]:not([disabled])")');
+      await js(`(() => {
+        const sel = document.getElementById('import-target');
+        sel.value = ${JSON.stringify(competitionId)};
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      })()`);
+      await until('izbor takmičenja',
+        `document.getElementById('import-target')?.value === ${JSON.stringify(competitionId)}`);
+      const root = await cdp.send('DOM.getDocument');
+      const picker = await cdp.send('DOM.querySelector', { nodeId: root.root.nodeId, selector: '#import-file' });
+      await cdp.send('DOM.setFileInputFiles', { nodeId: picker.nodeId, files: [formPath] });
+      await until('čitanje formulara', '!!document.querySelector("[data-import-run]:not([disabled])")');
+      const bad = await js(`[...document.querySelectorAll('.import-grid tr.is-bad')]
+        .map((tr) => tr.textContent.replace(/\\s+/g, ' ').trim())`);
+      const toast = await runImport();
+      const done = await js(`document.querySelector('.pf-card.is-done')?.textContent
+        .replace(/\\s+/g, ' ').trim() || ''`);
+      return { bad, toast, done };
+    };
+
     await runImport();
     const first = await registry();
     if (first.entries !== fixture.entries) {
@@ -573,6 +677,7 @@ async function main() {
     }
     if (fixture.team && first.teams !== 1) fail(`Uvezena ${first.teams} ekipa umesto jedne.`);
     pass(`uvoz iz formulara: ${first.competitors} takmičara, ${first.entries} prijava, ${first.teams} ekipa`);
+    const idsAfterFirst = await fssPeople();
 
     // The same file again — nothing may change.
     await runImport();
@@ -581,6 +686,311 @@ async function main() {
       fail(`Dvostruki uvoz je promenio stanje: ${JSON.stringify(first)} → ${JSON.stringify(second)}`);
     }
     pass('isti fajl uvezen dvaput — bez duplikata');
+
+    // === FSS ID =============================================
+    //
+    // The yearly ID end to end: numbering, the form's ID column, transfers,
+    // the turn of the year, deletion and merging — through the real form
+    // and the real import screen where a club's file is involved.
+
+    // Numbering: the demo's competitors numbered from 1 in a fixed order,
+    // the fixture after them, nobody twice, a second import gives nothing.
+    {
+      const people = idsAfterFirst;
+      const total = fssInvariants(people, 'posle uvoza');
+      const n26 = numbersOf(people, season).sort((a, b) => a - b);
+      if (n26[0] !== 1 || n26[n26.length - 1] !== n26.length) {
+        fail(`Brojevi za ${season} nisu 1…${n26.length} bez rupa: ${n26.slice(0, 5).join(', ')}…`);
+      }
+      const demoFirst = await inStore(`
+        const all = await store.listCompetitions();
+        const demo = all.find((c) => c.date === '${season}-03-14');
+        if (!demo) return null;
+        const reg = await store.registryFor(demo.id);
+        return [...reg.competitors].sort((a, b) => a.name.localeCompare(b.name, 'sr')
+          || a.year - b.year || a.club.localeCompare(b.club, 'sr') || String(a.id).localeCompare(String(b.id)))
+          .slice(0, 2).map((c) => c.fssId);`);
+      if (demoFirst && (demoFirst[0] !== d.fssId(season, 1) || demoFirst[1] !== d.fssId(season, 2))) {
+        fail(`Prva dva takmičara demo takmičenja nose ${demoFirst.join(', ')} — očekuje se FSS-1 i FSS-2.`);
+      }
+      fixture.people.forEach((p) => {
+        if (!d.fssIdOf(personNamed(people, p.name), season)) fail(`${p.name} posle uvoza nema FSS ID.`);
+      });
+      (fixture.team?.members || []).forEach((m) => {
+        if (!d.fssIdOf(personNamed(people, m.name), season)) fail(`Član ekipe ${m.name} nema FSS ID.`);
+      });
+      if (numbersOf(people, season - 1).length) fail(`Takmičenja iz ${season - 1}. dobila su ID-eve.`);
+      const again = await fssPeople();
+      if (JSON.stringify(again.map((p) => p.fssIds)) !== JSON.stringify(people.map((p) => p.fssIds))) {
+        fail('Drugi uvoz istog fajla promenio je FSS ID-eve.');
+      }
+      pass(`FSS ID: ${total} ID-eva, ${season}. od 1 do ${n26.length} bez rupa, `
+        + 'prvi po abecedi FSS-1, drugi FSS-2, svako po jedan, ponovljen uvoz ne daje nove');
+    }
+
+    // A form with IDs: own ID with the name spelled without diacritics,
+    // no ID, a newcomer, somebody else's ID, a malformed ID, an ID from a
+    // year nobody has.
+    const P = fixture.people;
+    const soloDiscipline = (year, onSeason) => {
+      const group = d.groupOfYear(year, onSeason);
+      return d.DISCIPLINES.find((x) => !x.team && x.drawBy !== 'weight'
+        && x.groups.includes(group))?.name;
+    };
+    const plain = (p, onSeason = season) => ({
+      name: p.name, year: p.year, sex: p.sex, belt: p.belt || 'zeleni', weight: '',
+      disciplines: [soloDiscipline(p.year, onSeason)],
+    });
+    const idOf = (people, name) => d.fssIdOf(personNamed(people, name), season);
+    const ascii = (s) => s.normalize('NFD').replace(/\p{M}/gu, '').replace(/đ/g, 'dj').replace(/Đ/g, 'Dj');
+    const comp2 = await createCompetition('Provera FSS ID-a', `${season}-06-10`);
+    {
+      const before = await fssPeople();
+      const top = Math.max(...numbersOf(before, season));
+      const form = path.join(tmp, 'KK-Provera-ID.xlsx');
+      fillForm({
+        competitionName: 'Provera FSS ID-a', team: null,
+        people: [
+          { ...P[0], name: ascii(P[0].name), fss: idOf(before, P[0].name) },
+          { ...P[1] },
+          { ...plain(P[2]), name: 'Novko Novaković' },
+          { ...plain(P[3]), name: 'Uljez Uljezović', fss: idOf(before, P[3].name) },
+          { ...plain(P[2]), name: 'Formo Formatović', fss: `FSS-A/${season % 100}` },
+          { ...P[4], fss: d.fssId(season - 1, 5) },
+        ],
+      }, form);
+      const { toast, done, bad } = await importForm(form, comp2);
+      if (!bad.some((t) => t.includes('Uljez') && t.includes('pripada takmičaru'))) {
+        fail(`Pregled uvoza ne zaustavlja tuđi ID: ${JSON.stringify(bad)}`);
+      }
+      if (/nije uvezeno zbog FSS ID-a/.test(toast)) fail(`Tuđi ID je stigao do uvoza: ${toast}`);
+      const after = await fssPeople();
+      fssInvariants(after, 'formular sa ID-em');
+      const reg = await inStore(`return (await store.registryFor(${JSON.stringify(comp2)})).competitors
+        .map((c) => ({ name: c.name, personId: c.personId, fssId: c.fssId }));`);
+      if (reg.length !== 5) fail(`Uvezeno ${reg.length} takmičara umesto 5: ${reg.map((c) => c.name).join(', ')}`);
+      const a = personNamed(after, P[0].name);
+      if (reg.find((c) => c.name === ascii(P[0].name))?.personId !== a.id) {
+        fail('Takmičar sa svojim ID-em (ime bez kvačica) nije prepoznat kao ista osoba.');
+      }
+      if (!a.aliases.length) fail('Drugi zapis imena nije sačuvan kao alias.');
+      if (after.length !== before.length + 2) {
+        fail(`Nastalo ${after.length - before.length} novih osoba umesto 2 (novajlija i neispravan ID).`);
+      }
+      if (idOf(after, 'Novko Novaković') !== d.fssId(season, top + 1)
+        || idOf(after, 'Formo Formatović') !== d.fssId(season, top + 2)) {
+        fail(`Novi ID-evi nisu ${top + 1} i ${top + 2}: ${idOf(after, 'Novko Novaković')}, `
+          + `${idOf(after, 'Formo Formatović')}`);
+      }
+      [P[0], P[1], P[4]].forEach((p) => {
+        if (JSON.stringify(personNamed(after, p.name).fssIds) !== JSON.stringify(personNamed(before, p.name).fssIds)) {
+          fail(`${p.name} je dobio drugi ID iste godine.`);
+        }
+      });
+      if (!/ne postoji u bazi/.test(done) || !/nije FSS ID/.test(done)) {
+        fail(`Izveštaj uvoza ne imenuje zanemarene ID-eve: ${done}`);
+      }
+      pass(`formular sa ID-em: svoj ID prepoznat i bez kvačica, bez ID-a po imenu, novajlije `
+        + `${d.fssId(season, top + 1)} i ${d.fssId(season, top + 2)}, tuđi ID zaustavljen u pregledu, `
+        + 'neispravan i nepostojeći zanemareni');
+    }
+
+    // A transfer: the new club writes the person's ID — same person, same
+    // ID, points follow. A team member is moved on purpose: their old team
+    // must still find them (checked by the team gold below).
+    const mover = fixture.team?.members[0] || null;
+    if (mover) {
+      const before = await fssPeople();
+      const moverId = idOf(before, mover.name);
+      const form = path.join(tmp, 'KK-Provera-Dva.xlsx');
+      fillForm({
+        competitionName: 'Provera FSS ID-a', team: null,
+        club: { name: 'KK Provera Dva', city: 'Proverovac', coach: 'Trener Drugić' },
+        people: [
+          { ...plain({ ...mover, belt: 'plavi' }), fss: moverId },
+          { ...P[1], fss: idOf(before, P[1].name) },
+        ],
+      }, form);
+      const { toast, done } = await importForm(form, comp2);
+      const after = await fssPeople();
+      fssInvariants(after, 'prelazak');
+      const moved = personNamed(after, mover.name);
+      if (moved.club !== 'KK Provera Dva') fail(`Prelazak nije upisan: ${mover.name} je i dalje u ${moved.club}.`);
+      if (d.fssIdOf(moved, season) !== moverId) fail(`${mover.name} posle prelaska nema isti ID.`);
+      if (after.length !== before.length) fail('Prelazak sa ID-em napravio je novu osobu.');
+      if (!/Prelazak u drugi klub/.test(done)) fail(`Izveštaj ne imenuje prelazak: ${done}`);
+      if (!/nije uvezeno zbog FSS ID-a: 1/.test(toast)) {
+        fail(`Takmičar već prijavljen za drugi klub nije zaustavljen: ${toast}`);
+      }
+      pass(`prelazak po FSS ID-u: ${mover.name} u novom klubu sa istim ID-em, bez nove osobe; `
+        + 'već prijavljen za drugi klub zaustavljen');
+    }
+
+    // The turn of the year: last year's ID recognises the person, the new
+    // year numbers from 1 in row order, the old ID stays as history.
+    const next = season + 1;
+    const comp27 = await createCompetition('Provera nove godine', `${next}-03-01`);
+    {
+      const before = await fssPeople();
+      const form = path.join(tmp, `KK-Provera-${next}.xlsx`);
+      fillForm({
+        competitionName: 'Provera nove godine', team: null,
+        people: [
+          { ...plain(P[0], next), fss: idOf(before, P[0].name) },
+          { ...plain(P[1], next), fss: idOf(before, P[1].name) },
+          { ...plain(P[2], next) },
+          { ...plain(P[3], next), name: 'Mladen Mladenović' },
+        ],
+      }, form);
+      const { done } = await importForm(form, comp27);
+      const after = await fssPeople();
+      fssInvariants(after, 'nova godina');
+      const want = [P[0].name, P[1].name, P[2].name, 'Mladen Mladenović'];
+      want.forEach((name, i) => {
+        const got = d.fssIdOf(personNamed(after, name), next);
+        if (got !== d.fssId(next, i + 1)) fail(`${name} za ${next}. nosi ${got} umesto ${d.fssId(next, i + 1)}.`);
+      });
+      const a = personNamed(after, P[0].name);
+      if (d.fssIdOf(a, season) !== idOf(before, P[0].name)) fail('Prošlogodišnji ID nije ostao u istoriji.');
+      if (!after.some((p) => p.fssIds.includes(d.fssId(season, 1)))
+        || !after.some((p) => p.fssIds.includes(d.fssId(next, 1)))) {
+        fail(`${d.fssId(season, 1)} i ${d.fssId(next, 1)} ne postoje istovremeno.`);
+      }
+      if (!/Prepoznato po FSS ID-u\s*2/.test(done)) fail(`Prošlogodišnji ID-evi nisu prepoznali takmičare: ${done}`);
+      const again = await importForm(form, comp27);
+      if (/novih FSS ID-eva/.test(again.toast)) fail(`Ponovljen uvoz za ${next}. dao je nove ID-eve: ${again.toast}`);
+      pass(`nova godina: prošlogodišnji ID prepoznaje, ${d.fssId(next, 1)}…${d.fssId(next, 4)} redom, `
+        + `${idOf(before, P[0].name)} ostaje u istoriji, ${d.fssId(season, 1)} i ${d.fssId(next, 1)} postoje zajedno`);
+    }
+
+    // Deletion and merging, straight through the store: a deleted
+    // person's number is never handed out again; a mistyped year merged
+    // into the right person keeps one ID for the year.
+    {
+      const disc = soloDiscipline(season - 30, next);
+      const entry = (name, year) => JSON.stringify({
+        name, club: 'KK Provera', sex: 'M', year, belt: 'braon', weight: '', disciplines: [disc],
+      });
+      const result = await inStore(`
+        const comp27 = ${JSON.stringify(comp27)};
+        const gone = await store.addCompetitor(comp27, ${entry('Brisko Brisić', season - 30)});
+        await store.removeCompetitor(comp27, gone.competitorId);
+        const later = await store.addCompetitor(comp27, ${entry('Posle Brisića', season - 30)});
+        const twin = await store.addCompetitor(${JSON.stringify(comp2)}, ${entry('Spojko Spojić', season - 30)});
+        const typo = await store.addCompetitor(comp27, ${entry('Spojko Spojić', season - 29)});
+        const merged = await store.editCompetitor(comp27, typo.competitorId, ${entry('Spojko Spojić', season - 30)});
+        // The mistyped record also competed the year before, so it stays —
+        // and still hands this year's ID over.
+        await store.addCompetitor(${JSON.stringify(comp2)}, ${entry('Ostajko Ostojić', season - 29)});
+        const right = await store.addCompetitor(${JSON.stringify(comp2)}, ${entry('Ostajko Ostojić', season - 30)});
+        const wrong = await store.addCompetitor(comp27, ${entry('Ostajko Ostojić', season - 29)});
+        await store.editCompetitor(comp27, wrong.competitorId, ${entry('Ostajko Ostojić', season - 30)});
+        const people = await store.listPeople();
+        const ostajko = (year) => people.find((p) => p.name === 'Ostajko Ostojić' && p.year === year);
+        return {
+          gone: gone.fssId, later: later.fssId, twin: twin.fssId, typo: typo.fssId,
+          merged: merged.merged, mergedId: merged.fssId,
+          spojko: people.filter((p) => p.name === 'Spojko Spojić').map((p) => p.fssIds || []),
+          handed: wrong.fssId, right: right.fssId,
+          rightIds: ostajko(${season - 30})?.fssIds || [], wrongIds: ostajko(${season - 29})?.fssIds || [],
+        };`);
+      const goneNo = d.parseFssId(result.gone)?.number;
+      if (d.parseFssId(result.later)?.number !== goneNo + 1) {
+        fail(`Posle brisanja ${result.gone} sledeći je ${result.later} — broj je ponovo upotrebljen.`);
+      }
+      if (!result.merged || result.spojko.length !== 1) fail(`Spajanje nije spojilo: ${JSON.stringify(result)}`);
+      const [ids] = result.spojko;
+      if (!ids.includes(result.twin) || !ids.includes(result.typo) || result.mergedId !== result.typo) {
+        fail(`Posle spajanja ID-evi nisu na jednoj osobi: ${JSON.stringify(result)}`);
+      }
+      if (!result.rightIds.includes(result.handed) || result.wrongIds.includes(result.handed)
+        || result.wrongIds.length !== 1) {
+        fail(`Zapis koji ostaje nije predao ID za ${next}.: ${JSON.stringify(result)}`);
+      }
+      const dup = await js(`new Promise((resolve) => {
+        const open = indexedDB.open('fss-manager');
+        open.onsuccess = () => {
+          const db = open.result;
+          const t = db.transaction('people', 'readwrite');
+          t.objectStore('people').put({ id: 'dvojnik', identity: 'dvojnik', name: 'Dvojnik',
+            fssIds: [${JSON.stringify(result.later)}] });
+          t.oncomplete = () => { db.close(); resolve('upisano'); };
+          t.onabort = () => { db.close(); resolve(t.error?.name || 'prekinuto'); };
+        };
+        open.onerror = () => resolve('nema baze');
+      })`);
+      if (dup !== 'ConstraintError') fail(`Baza je primila drugu osobu sa ${result.later}: ${dup}`);
+      fssInvariants(await fssPeople(), 'brisanje i spajanje');
+      pass(`brisanje: posle ${result.gone} dolazi ${result.later}; spajanje: jedna osoba nosi `
+        + `${result.twin} i ${result.typo}; baza odbija drugu osobu sa istim ID-em`);
+    }
+
+    // A form from before the column: imports as it always did.
+    {
+      const comp3 = await createCompetition('Provera starog formulara', `${season}-07-10`);
+      const form = path.join(tmp, 'KK-Provera-stari.xlsx');
+      fillForm(fixture, form, { withoutFssColumn: true });
+      const before = await fssPeople();
+      await importForm(form, comp3);
+      const reg = await inStore(`const r = await store.registryFor(${JSON.stringify(comp3)});
+        return { entries: r.entries.length, ids: r.competitors.filter((c) => c.fssId).length,
+          competitors: r.competitors.length };`);
+      if (reg.entries !== fixture.entries) fail(`Stari formular: ${reg.entries} prijava od ${fixture.entries}.`);
+      if (reg.ids !== reg.competitors) fail('Stari formular: neko je ostao bez FSS ID-a.');
+      if ((await fssPeople()).length !== before.length) fail('Stari formular je napravio duplikate.');
+      pass(`formular bez kolone FSS ID uvezen: ${reg.entries} prijava, isti ljudi, isti ID-evi`);
+    }
+
+    // On screen: the column, search by ID, read-only in the correction,
+    // the history on the record card.
+    {
+      const people = await fssPeople();
+      const target = P[5] || P[0];
+      const id = idOf(people, target.name);
+      await js('location.hash = "takmicari"');
+      await until('spisak takmičara', '!!document.getElementById("competitor-search")');
+      const head = await js('[...document.querySelectorAll(".grid thead th")].map((th) => th.textContent.trim())');
+      if (!head.includes('FSS ID')) fail('Spisak takmičara nema kolonu FSS ID.');
+      const found = await js(`(() => {
+        const box = document.getElementById('competitor-search');
+        box.value = ${JSON.stringify(id.toLowerCase())};
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+        return [...document.querySelectorAll('tr[data-search]')].filter((r) => !r.hidden)
+          .map((r) => r.querySelector('.col-name').textContent.trim());
+      })()`);
+      if (found.length !== 1 || found[0] !== target.name) {
+        fail(`Pretraga po ${id} našla: ${JSON.stringify(found)}`);
+      }
+      await js(`[...document.querySelectorAll('tr[data-search]')].find((r) => !r.hidden)
+        .querySelector('[data-edit-entry]').click()`);
+      await until('ispravka prijave', '!!document.getElementById("edit-entry-form")');
+      const dialog = await js(`(() => {
+        const form = document.getElementById('edit-entry-form');
+        return { text: form.textContent, editable: [...form.querySelectorAll('input, select')]
+          .some((el) => el.value === ${JSON.stringify(id)}) };
+      })()`);
+      if (!dialog.text.includes(id) || dialog.editable) {
+        fail(`Ispravka prijave ne prikazuje ${id} samo za čitanje.`);
+      }
+      await js('document.querySelector("#modal button[data-close]").click()');
+      const a = personNamed(people, P[0].name);
+      const card = await js(`(async () => {
+        const btn = document.createElement('button');
+        btn.dataset.person = ${JSON.stringify(a.id)};
+        document.getElementById('app').append(btn);
+        btn.click();
+        for (let i = 0; i < 50 && !document.querySelector('.career-ids'); i++) {
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        btn.remove();
+        const text = document.querySelector('.career-ids')?.textContent || '';
+        document.querySelector('#modal button[data-close]')?.click();
+        return text;
+      })()`);
+      if (!a.fssIds.every((x) => card.includes(x))) fail(`Kartica ne prikazuje istoriju ID-eva: ${card}`);
+      pass(`na ekranu: kolona FSS ID, pretraga po ${id}, ID samo za čitanje u ispravci, `
+        + `istorija ${a.fssIds.join(' · ')} na kartici takmičara`);
+    }
 
     // === Dashboard figures =============================================
     await js('location.hash = "kontrolna-tabla"');
@@ -607,8 +1017,10 @@ async function main() {
       await store.setCompetitionStatus(${JSON.stringify(compId)}, 'Završeno');
       const tally = await store.tallyByPerson(${JSON.stringify(compId)});
       const people = await store.listPeople();
+      // By name and year only: one member has moved club since (the
+      // transfer check above) and must still be found through the team.
       const members = (team.members || []).map((m) => {
-        const person = people.find((p) => p.club === team.club && p.year === m.year
+        const person = people.find((p) => p.year === m.year
           && p.name.toLowerCase() === m.name.toLowerCase());
         const t = person && tally.get(person.id);
         return { name: m.name, found: !!person, zlato: t?.here.zlato || 0, bodovi: t?.here.bodovi || 0 };
@@ -632,7 +1044,8 @@ async function main() {
     if (teamCheck.club.zlato !== 1 || teamCheck.club.medalje !== 1 || teamCheck.club.bodovi !== gold) {
       fail(`Klubu ekipno zlato nije upisano jednom: ${JSON.stringify(teamCheck.club)}`);
     }
-    pass(`ekipno zlato: ${teamCheck.members.length} člana po ${gold} bodova, klubu jedna medalja`);
+    pass(`ekipno zlato: ${teamCheck.members.length} člana po ${gold} bodova, klubu jedna medalja`
+      + (mover ? ` — i ${mover.name}, koji je u međuvremenu prešao u drugi klub` : ''));
 
     // The team diploma exists and carries the team name, not members.
     await js('location.hash = "diplome"');
@@ -673,6 +1086,12 @@ async function main() {
         fail(`${err.message}\n  stanje: ${state}\n  konzola: ${consoleErrors.join(' | ') || '(čista)'}`);
       }
       await sleep(150);
+
+      // The club sheet is where coaches read their competitors' IDs.
+      if (type === 'klubovi') {
+        const shown = await js(`(document.getElementById('doc-sheet').textContent.match(/FSS-\\d+\\/\\d{2}/g) || []).length`);
+        if (shown < fixture.people.length) fail(`Prijave po klubovima nose ${shown} FSS ID-eva — premalo.`);
+      }
 
       // Nothing may stick out of the sheet — width or height.
       const clipped = await js(`[...document.querySelectorAll('#doc-sheet section.page')]

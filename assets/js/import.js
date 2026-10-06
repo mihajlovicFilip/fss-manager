@@ -16,11 +16,16 @@
  *
  * A bad row does not sink the others. Every row carries its own message
  * with its Excel row number, so the club can be told exactly what to fix.
+ *
+ * The "FSS ID" column is optional — forms from before it import as they
+ * always did. An ID that belongs to somebody else stops its row here
+ * already, by the same rule the import applies (fssVerdict in data.js).
  */
 
 import {
   BELTS, WEIGHTS, DISCIPLINES,
   ageByCode, disciplineByName, groupOfYear, levelOfBelt, teamVariants, SEASON, properName,
+  fssVerdict,
 } from './data.js';
 import { readWorkbook } from './xlsx.js';
 
@@ -123,9 +128,35 @@ function headerFields(rows, wanted) {
 const sheetLike = (book, ...words) => book.names.find((n) =>
   words.some((w) => key(n).includes(key(w))));
 
+// === FSS ID =============================================
+
+/**
+ * What the screen says next to an ID on a row that imports. Empty for
+ * this year's ID that matched — nothing to add.
+ */
+function fssNote(said, season, club) {
+  if (said.status === 'invalid') return `„${said.typed}" nije FSS ID — zanemaren`;
+  if (said.status === 'unknown') return `${said.id} ne postoji u bazi — zanemaren`;
+  if (said.status !== 'match') return '';
+  const notes = [];
+  if (said.old) {
+    notes.push(said.current
+      ? `ID iz ${said.from}. — važeći je ${said.current}`
+      : `ID iz ${said.from}. — dobija nov za ${season}.`);
+  }
+  const from = said.person.club || '';
+  if (club && from && from.toLowerCase() !== club.toLowerCase()) notes.push(`prelazak iz kluba ${from}`);
+  return notes.join(' · ');
+}
+
 // === Individual entries =============================================
 
-function readSolo(rows, season) {
+/**
+ * @param {Map} [owners] FSS ID → person, from the database; without it the
+ *                       IDs are read but not checked
+ * @param {string} [club] the club in the form's header — for naming a transfer
+ */
+function readSolo(rows, season, owners = null, club = '') {
   const head = headerRow(rows, ['Godište', 'Ime i prezime']);
   if (!head) {
     return { rows: [], error: 'Na listu prijava nema reda sa naslovima kolona (Godište, Ime i prezime).' };
@@ -137,13 +168,14 @@ function readSolo(rows, season) {
   const cPol = col('Pol');
   const cPojas = col('Pojas');
   const cKg = col('Telesna težina');
+  const cFss = col('FSS ID');
   // Disciplines are all columns whose header starts with "Disciplina" —
   // however many the form has.
   const cDisc = [];
   head.map.forEach((at, k) => { if (k.startsWith('disciplina')) cDisc.push(at); });
   cDisc.sort((a, b) => a - b);
 
-  const unos = [cGod, cIme, cPol, cPojas, cKg, ...cDisc];
+  const unos = [cGod, cIme, cPol, cPojas, cKg, cFss, ...cDisc];
   const out = [];
   const seen = new Map();
   let prazno = 0;
@@ -206,16 +238,32 @@ function readSolo(rows, season) {
       return null;
     })();
 
+    // The ID stays on the row whatever becomes of it — the screen shows it.
+    const typed = cFss === undefined ? '' : tidy(row[cFss]);
+    if (typed) line.fss = typed;
     if (!problem) {
+      line.competitor.row = line.excelRow;
+      if (typed) line.competitor.fss = typed;
+    }
+    const said = !problem && typed && owners
+      ? fssVerdict(line.competitor, season, (id) => owners.get(id) || null)
+      : { status: 'none' };
+
+    if (problem) {
+      line.problem = problem;
+    } else if (said.status === 'conflict') {
+      line.problem = `${said.id} pripada takmičaru ${said.person.name} (${said.person.year}, `
+        + `${said.person.club || 'bez kluba'}) — proveri ID ili ime`;
+      delete line.competitor;
+    } else {
       const dup = `${key(line.competitor.name)}|${year}`;
       if (seen.has(dup)) {
         line.problem = `takmičar je već unet u redu ${seen.get(dup)}`;
         delete line.competitor;
       } else {
         seen.set(dup, line.excelRow);
+        line.fssNote = fssNote(said, season, club);
       }
-    } else {
-      line.problem = problem;
     }
     out.push(line);
   }
@@ -338,12 +386,13 @@ function readTeams(rows, season) {
  * Reads an entry file. Never throws — the file arrived from outside and
  * can be anything.
  *
+ * @param {Map} [owners] FSS ID → person, to check the form's IDs (store.fssOwners)
  * @returns {Promise<{error?: string, payload?: object, summary?: object,
  *                    people?: object[], teams?: object[]}>}
  *   `people` and `teams` are all rows read, valid and invalid, each with
  *   its Excel row number — the screen shows all, imports only the valid.
  */
-export async function readEntryFile(file, season = SEASON()) {
+export async function readEntryFile(file, season = SEASON(), owners = null) {
   let book;
   try {
     book = await readWorkbook(file);
@@ -361,7 +410,7 @@ export async function readEntryFile(file, season = SEASON()) {
     return { error: 'U zaglavlju prijave nije upisan klub — bez njega se prijava ne može uvesti.' };
   }
 
-  const solo = readSolo(soloRows, season);
+  const solo = readSolo(soloRows, season, owners, fields.Klub);
   if (solo.error) return { error: solo.error };
   const teams = teamName ? readTeams(book.sheet(teamName), season) : { rows: [] };
 

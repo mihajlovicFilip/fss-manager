@@ -20,6 +20,9 @@
  *   competitions  the competitions themselves
  *   meta          active competition, mat plan, seasons
  *
+ * A person also carries their yearly FSS IDs (fssIds) — one per calendar
+ * year, handed out here and nowhere else (see "FSS ID" below).
+ *
  * Points are never stored as a number. They are always computed from
  * placements via PLACEMENTS in data.js — change the scale in one place
  * and every old table recalculates itself.
@@ -30,13 +33,14 @@ import {
   disciplinesForGroup, categoryKey, pointsFor, placementByKey, calendarOf, labelTeams,
   clubByName, groupOfYear, SEASON, DIPLOMA_DEFAULT, pointsCounted, BELTS, WEIGHTS,
   levelOfBelt, seasonOf, entriesOpen, FEES_DEFAULT, properName,
+  FSS_ID_SINCE, fssId, fssIdOf, nextFssNumber, fssVerdict,
 } from './data.js';
 
 /** The demo includes one past-season competition, split by its table. */
 const PROSLA_SEZONA = SEASON() - 1;
 
 const DB_NAME = 'fss-manager';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 /**
  * The database name before the product name was fixed. A rename without a
@@ -45,9 +49,17 @@ const DB_VERSION = 2;
  */
 const PREVIOUS_DB_NAME = 'fss-menager';
 
+/*
+ * An index is a name, or { name, unique, multiEntry } when it needs more.
+ * fssIds is unique across all people: the database itself refuses a
+ * second person with an ID somebody already holds.
+ */
 const STORES = {
   competitions: { keyPath: 'id' },
-  people: { keyPath: 'id', indexes: ['identity'] },
+  people: {
+    keyPath: 'id',
+    indexes: ['identity', { name: 'fssIds', unique: true, multiEntry: true }],
+  },
   competitors: { keyPath: 'id', indexes: ['competitionId', 'personId'] },
   entries: { keyPath: 'id', indexes: ['competitionId', 'competitorId'] },
   results: { keyPath: 'id', indexes: ['competitionId', 'personId', 'entryId'] },
@@ -123,7 +135,8 @@ function openDb() {
           ? upgrade.objectStore(name)
           : db.createObjectStore(name, { keyPath: spec.keyPath });
         (spec.indexes || []).forEach((index) => {
-          if (!os.indexNames.contains(index)) os.createIndex(index, index, { unique: false });
+          const { name, ...options } = typeof index === 'string' ? { name: index } : index;
+          if (!os.indexNames.contains(name)) os.createIndex(name, name, { unique: false, ...options });
         });
       });
     };
@@ -203,6 +216,18 @@ const teamOf = (result, teamById) => (result.kind === 'team'
   ? teamById.get(result.teamId || result.entryId) || null : null);
 
 /**
+ * Everyone by identity: current identities first, then former ones
+ * (aliases). An alias is a name an FSS ID proved belongs to the same
+ * person — another spelling, or the club before a transfer — so a team
+ * entered under it still finds its member.
+ */
+const identityIndex = (people) => {
+  const map = new Map(people.map((p) => [p.identity, p]));
+  people.forEach((p) => (p.aliases || []).forEach((a) => { if (!map.has(a)) map.set(a, p); }));
+  return map;
+};
+
+/**
  * Migrates existing people to club-carrying identities. An older database
  * has identities without the club; unmigrated, the next import would see
  * everyone as unknown and duplicate them. The club comes from the most
@@ -229,6 +254,92 @@ async function migrateIdentities() {
     updated.forEach((r) => ppl.put(r));
     meta.put({ key: 'identityVersion', value: 2 });
   });
+}
+
+// === FSS ID =============================================
+
+/** meta key: the highest number handed out per year — outlives deletions. */
+const FSS_TOP = 'fssTop';
+
+/**
+ * Hands out a year's next numbers. It starts from everyone already in the
+ * database and from `tops`, the remembered highest per year, which it
+ * updates in place for the caller to store with the people.
+ */
+function fssDispenser(people, tops) {
+  const ids = people.flatMap((p) => p.fssIds || []);
+  const next = new Map();
+  return (year) => {
+    const n = next.get(year) || nextFssNumber(ids, year, tops[year] || 0);
+    next.set(year, n + 1);
+    tops[year] = n;
+    return fssId(year, n);
+  };
+}
+
+/**
+ * Gives a person their ID for the year if they have none yet. True when
+ * one was given. Years before FSS_ID_SINCE give nothing.
+ */
+function grantFssId(person, year, dispense) {
+  if (year < FSS_ID_SINCE || fssIdOf(person, year)) return false;
+  person.fssIds = [...(person.fssIds || []), dispense(year)];
+  return true;
+}
+
+/** Fixed order for numbering: alphabetically, then year, club and id. */
+const byNameForIds = (a, b) => String(a.name).localeCompare(String(b.name), 'sr')
+  || Number(a.year) - Number(b.year)
+  || String(a.club || '').localeCompare(String(b.club || ''), 'sr')
+  || String(a.id).localeCompare(String(b.id));
+
+/**
+ * Everybody competing from FSS_ID_SINCE on has their ID for the
+ * competition's year. Runs on every start: the first time it numbers a
+ * database that had no IDs, after that it only fills a gap if one shows
+ * up. The order is fixed — competitions by date, their competitors
+ * alphabetically, then team members — so the same database always gets
+ * the same numbers. A failure must not stop the app from opening; the
+ * next start tries again.
+ */
+async function ensureFssIds() {
+  try {
+    const [competitions, competitors, teams, people, tops] = await Promise.all([
+      all('competitions'), all('competitors'), all('teams'), all('people'), metaGet(FSS_TOP, {}),
+    ]);
+    const personById = new Map(people.map((p) => [p.id, p]));
+    const byIdentity = identityIndex(people);
+    const dispense = fssDispenser(people, tops);
+    const changed = new Set();
+    const give = (person, year) => {
+      if (person && grantFssId(person, year, dispense)) changed.add(person);
+    };
+
+    competitions
+      .filter((c) => seasonOf(c) >= FSS_ID_SINCE)
+      .sort((a, b) => (a.date || '').localeCompare(b.date || '')
+        || (a.createdAt || '').localeCompare(b.createdAt || '')
+        || String(a.id).localeCompare(String(b.id)))
+      .forEach((competition) => {
+        const year = seasonOf(competition);
+        competitors.filter((c) => c.competitionId === competition.id)
+          .sort(byNameForIds)
+          .forEach((c) => give(personById.get(c.personId), year));
+        teams.filter((t) => t.competitionId === competition.id)
+          .sort((a, b) => [a.discipline, a.group, a.variant || a.sex, a.club].join('|')
+            .localeCompare([b.discipline, b.group, b.variant || b.sex, b.club].join('|'), 'sr')
+            || String(a.id).localeCompare(String(b.id)))
+          .forEach((t) => teamMembersOf(t, byIdentity).forEach((p) => give(p, year)));
+      });
+
+    if (!changed.size) return;
+    await tx(['people', 'meta'], 'readwrite', (ppl, meta) => {
+      changed.forEach((p) => ppl.put(p));
+      meta.put({ key: FSS_TOP, value: tops });
+    });
+  } catch (err) {
+    console.warn('FSS ID-evi nisu dodeljeni:', err.message);
+  }
 }
 
 // === Seeding on first run =============================================
@@ -529,7 +640,7 @@ export const store = {
     if (!readyPromise) {
       readyPromise = migrateFromPreviousName()
         .then(openDb).then(seed).then(refreshDemo).then(linkPeople)
-        .then(migrateIdentities);
+        .then(migrateIdentities).then(ensureFssIds);
     }
     return readyPromise;
   },
@@ -602,6 +713,7 @@ export const store = {
           entries.forEach((r) => ent.put(r));
           teams.forEach((r) => tms.put(r));
         });
+      await ensureFssIds();
       competition.entries = entries.length;
       competition.competitors = competitors.length;
     }
@@ -653,15 +765,28 @@ export const store = {
    */
   async registryFor(competitionId) {
     if (!competitionId) return { competitors: [], entries: [], teams: [] };
-    const [competitors, entries, teams] = await Promise.all([
+    const [competition, competitors, entries, teams, register] = await Promise.all([
+      store.getCompetition(competitionId),
       allBy('competitors', 'competitionId', competitionId),
       allBy('entries', 'competitionId', competitionId),
       allBy('teams', 'competitionId', competitionId),
+      all('people'),
     ]);
     // A team's display name is computed, never stored — the numeral
     // depends on how many teams the club has in the category, and that
     // changes with every new entry.
     labelTeams(teams);
+    // The FSS ID shown is the person's ID for this competition's year —
+    // read from the person, never copied onto the entry.
+    const year = seasonOf(competition);
+    const personById = new Map(register.map((p) => [p.id, p]));
+    const byIdentity = identityIndex(register);
+    competitors.forEach((c) => { c.fssId = fssIdOf(personById.get(c.personId), year); });
+    teams.forEach((t) => {
+      t.members = (t.members || []).map((m) => ({
+        ...m, fssId: fssIdOf(byIdentity.get(identityOf({ ...m, club: t.club })), year),
+      }));
+    });
     const people = new Map(competitors.map((c) => [c.id, c]));
     return {
       competitors,
@@ -680,8 +805,17 @@ export const store = {
    * on the competition are skipped and counted separately, so a club may
    * send a corrected file.
    *
+   * An FSS ID on a row names the person directly — this year's or an
+   * older one, which is how a club writes it until the new one arrives —
+   * but only when it agrees with the row's name and birth year. One that
+   * belongs to somebody else stops the row (rejected, with its Excel row
+   * number); one that is malformed or unknown is ignored and the row is
+   * matched by name as before (notes). Everybody imported leaves with
+   * their ID for the competition's year.
+   *
    * @returns {{people:number, competitors:number, entries:number, skipped:number,
-   *            teams:number, teamsSkipped:number}}
+   *            teams:number, teamsSkipped:number, granted:number, recognized:number,
+   *            transfers:Array, rejected:Array, notes:Array}}
    */
   async importClubEntry(competitionId, payload) {
     const competition = await store.getCompetition(competitionId);
@@ -696,12 +830,14 @@ export const store = {
     const club = payload.club;
     const city = payload.city || clubByName(club)?.city || '';
     const coach = payload.coach || clubByName(club)?.coach || '';
+    const year = seasonOf(competition);
 
-    const [people, mine, theirEntries, theirTeams] = await Promise.all([
+    const [people, mine, theirEntries, theirTeams, tops] = await Promise.all([
       all('people'),
       allBy('competitors', 'competitionId', competitionId),
       allBy('entries', 'competitionId', competitionId),
       allBy('teams', 'competitionId', competitionId),
+      metaGet(FSS_TOP, {}),
     ]);
 
     /**
@@ -709,34 +845,124 @@ export const store = {
      * licences arrive), so the same name and year under another club is
      * a new person. Such cases are reported to the caller (transfers)
      * with both clubs, so the editor knows a namesake or a transfer was
-     * found — never decided quietly.
+     * found — never decided quietly. A former identity (alias) counts
+     * after the current ones.
      */
     const byIdentity = new Map();
+    const byAlias = new Map();
     const byLoose = new Map();
-    people.forEach((p) => {
-      const add = (map, k) => {
-        if (!map.has(k)) map.set(k, []);
-        map.get(k).push(p);
-      };
-      add(byIdentity, p.identity);
-      if (!p.licence) add(byLoose, looseIdentity(p));
-    });
+    const add = (map, k, p) => {
+      if (!map.has(k)) map.set(k, []);
+      map.get(k).push(p);
+    };
+    const index = (p) => {
+      add(byIdentity, p.identity, p);
+      (p.aliases || []).forEach((a) => add(byAlias, a, p));
+      if (!p.licence) add(byLoose, looseIdentity(p), p);
+    };
+    people.forEach(index);
+    const candidatesOf = (identity) =>
+      [...(byIdentity.get(identity) || []), ...(byAlias.get(identity) || [])];
+
+    const owners = new Map(people.flatMap((p) => (p.fssIds || []).map((id) => [id, p])));
+    const dispense = fssDispenser(people, tops);
 
     const key = (personId, forClub) => `${personId}|${forClub}`;
     const hereByClub = new Map(mine.map((c) => [key(c.personId, c.club), c]));
-    const busy = new Set(mine.filter((c) => c.club !== club).map((c) => c.personId));
+    // Who is already entered here for another club, and for which.
+    const busy = new Map(mine.filter((c) => c.club !== club).map((c) => [c.personId, c.club]));
     const hasEntry = new Set(theirEntries.map((e) => `${e.competitorId}|${e.discipline}`));
 
     const newPeople = [];
+    const changedPeople = new Set();
     const newCompetitors = [];
     const newEntries = [];
     const transfers = [];
+    const rejected = [];
+    const notes = [];
     let skipped = 0;
+    let granted = 0;
+    let recognized = 0;
+
+    const give = (person) => {
+      if (!grantFssId(person, year, dispense)) return;
+      granted += 1;
+      if (!newPeople.includes(person)) changedPeople.add(person);
+    };
+
+    /**
+     * The ID proved this row is `person`. When the row says it another way
+     * — another club (a transfer) or another spelling — the person takes
+     * the new club, and what they were called before stays as an alias,
+     * so older teams and forms written the old way still find them.
+     */
+    const relink = (person, row, identity, id) => {
+      const from = person.club || '';
+      const moved = from.toLowerCase() !== club.toLowerCase();
+      const current = moved ? identityOf({ ...person, club }) : person.identity;
+      const takenByOther = (k) => (byIdentity.get(k) || []).some((p) => p.id !== person.id);
+      if (moved && takenByOther(current)) {
+        notes.push({
+          row: row.row, name: row.name,
+          message: `${person.name} (${person.year}) već postoji u bazi i pod klubom ${club}`
+            + ` — moguće da je ista osoba upisana dvaput; prijava je vezana za ${id}`,
+        });
+        return;
+      }
+      const aliases = new Set(person.aliases || []);
+      if (current !== person.identity) aliases.add(person.identity);
+      if (identity !== current && !takenByOther(identity)) aliases.add(identity);
+      aliases.delete(current);
+      if (!moved && aliases.size === (person.aliases || []).length) return;
+
+      const before = byIdentity.get(person.identity) || [];
+      byIdentity.set(person.identity, before.filter((p) => p !== person));
+      person.identity = current;
+      person.aliases = [...aliases];
+      if (moved) person.club = club;
+      add(byIdentity, current, person);
+      aliases.forEach((a) => add(byAlias, a, person));
+      if (!newPeople.includes(person)) changedPeople.add(person);
+      if (moved) {
+        transfers.push({ name: person.name, year: person.year, from, to: club, id, recognized: true });
+      }
+    };
 
     (payload.competitors || []).forEach((c) => {
       const identity = identityOf({ ...c, club });
-      const candidates = byIdentity.get(identity) || [];
-      let person = candidates.find((p) => !busy.has(p.id)) || null;
+      const said = fssVerdict(c, year, (id) => owners.get(id) || null);
+      let person = null;
+
+      if (said.status === 'conflict') {
+        rejected.push({
+          row: c.row, name: c.name,
+          message: `${said.id} pripada takmičaru ${said.person.name}`
+            + ` (${said.person.year}, ${said.person.club || 'bez kluba'})`,
+        });
+        return;
+      }
+      if (said.status === 'match') {
+        if (busy.has(said.person.id)) {
+          rejected.push({
+            row: c.row, name: c.name,
+            message: `${said.id} — ${said.person.name} je na ovom takmičenju već prijavljen`
+              + ` za ${busy.get(said.person.id)}`,
+          });
+          return;
+        }
+        person = said.person;
+        recognized += 1;
+        relink(person, c, identity, said.id);
+      } else if (said.status === 'invalid' || said.status === 'unknown') {
+        notes.push({
+          row: c.row, name: c.name,
+          message: said.status === 'invalid'
+            ? `„${said.typed}" nije FSS ID — zanemaren, takmičar je tražen po imenu`
+            : `${said.id} ne postoji u bazi — zanemaren, takmičar je tražen po imenu`,
+        });
+      }
+
+      if (!person) person = candidatesOf(identity).find((p) => !busy.has(p.id)) || null;
 
       if (!person) {
         // The same person under another club — or a namesake. Without a
@@ -751,13 +977,10 @@ export const store = {
           id: newId(), identity, name: c.name, sex: c.sex, year: c.year,
           club, licence: null,
         };
-        if (!byIdentity.has(identity)) byIdentity.set(identity, []);
-        byIdentity.get(identity).push(person);
-        const loose = looseIdentity(c);
-        if (!byLoose.has(loose)) byLoose.set(loose, []);
-        byLoose.get(loose).push(person);
+        index(person);
         newPeople.push(person);
       }
+      give(person);
 
       // The age group is computed from the year here too, never taken
       // from the file — the rulebook is the only source.
@@ -799,21 +1022,21 @@ export const store = {
     (payload.teams || []).forEach((t) => {
       (t.members || []).forEach((m) => {
         const identity = identityOf({ ...m, club });
-        if (byIdentity.has(identity)) return;
-        const elsewhere = (byLoose.get(looseIdentity(m)) || [])
-          .filter((p) => String(p.club || '').toLowerCase() !== club.toLowerCase());
-        if (elsewhere.length) {
-          transfers.push({ name: m.name, year: m.year, from: elsewhere[0].club || '', to: club });
+        let person = candidatesOf(identity)[0] || null;
+        if (!person) {
+          const elsewhere = (byLoose.get(looseIdentity(m)) || [])
+            .filter((p) => String(p.club || '').toLowerCase() !== club.toLowerCase());
+          if (elsewhere.length) {
+            transfers.push({ name: m.name, year: m.year, from: elsewhere[0].club || '', to: club });
+          }
+          person = {
+            id: newId(), identity, name: m.name, sex: m.sex, year: m.year,
+            club, licence: null,
+          };
+          index(person);
+          newPeople.push(person);
         }
-        const person = {
-          id: newId(), identity, name: m.name, sex: m.sex, year: m.year,
-          club, licence: null,
-        };
-        byIdentity.set(identity, [person]);
-        const loose = looseIdentity(m);
-        if (!byLoose.has(loose)) byLoose.set(loose, []);
-        byLoose.get(loose).push(person);
-        newPeople.push(person);
+        give(person);
       });
     });
 
@@ -833,16 +1056,22 @@ export const store = {
       newTeams.push(record);
     });
 
-    await tx(['people', 'competitors', 'entries', 'teams'], 'readwrite',
-      (ppl, cmp, ent, tms) => {
+    await tx(['people', 'competitors', 'entries', 'teams', 'meta'], 'readwrite',
+      (ppl, cmp, ent, tms, meta) => {
+        changedPeople.forEach((r) => ppl.put(r));
         newPeople.forEach((r) => ppl.put(r));
         newCompetitors.forEach((r) => cmp.put(r));
         newEntries.forEach((r) => ent.put(r));
         newTeams.forEach((r) => tms.put(r));
+        if (granted) meta.put({ key: FSS_TOP, value: tops });
       });
 
     return {
       transfers,
+      rejected,
+      notes,
+      granted,
+      recognized,
       people: newPeople.length,
       competitors: newCompetitors.length,
       entries: newEntries.length,
@@ -850,6 +1079,15 @@ export const store = {
       teams: newTeams.length,
       teamsSkipped,
     };
+  },
+
+  /**
+   * Who holds which FSS ID — the import screen checks a form's IDs
+   * against it before anything is written. Map ID → person.
+   */
+  async fssOwners() {
+    const people = await all('people');
+    return new Map(people.flatMap((p) => (p.fssIds || []).map((id) => [id, p])));
   },
 
   // === Entry corrections =============================================
@@ -934,15 +1172,18 @@ export const store = {
     const clean = await store.validateEntry(competition, patch);
     if (!clean.club) throw new Error('Nije izabran klub.');
 
-    const [people, mine] = await Promise.all([
+    const [people, mine, tops] = await Promise.all([
       all('people'),
       allBy('competitors', 'competitionId', competitionId),
+      metaGet(FSS_TOP, {}),
     ]);
 
     // Same rule as the import: a taken person means either the same
     // entry (an error) or a namesake from another club (a new person).
+    // Current identities first, then former ones.
     const identity = identityOf(clean);
-    const candidates = people.filter((p) => p.identity === identity);
+    const candidates = people.filter((p) => p.identity === identity)
+      .concat(people.filter((p) => p.identity !== identity && (p.aliases || []).includes(identity)));
     const busy = new Set(mine.map((c) => c.personId));
     const already = mine.find((c) => candidates.some((p) => p.id === c.personId));
     if (already) {
@@ -970,9 +1211,12 @@ export const store = {
       club: clean.club, city: clean.city, coach: clean.coach,
       belt: clean.belt, level: clean.level, weight: clean.weight,
     };
+    const year = seasonOf(competition);
+    const granted = grantFssId(person, year, fssDispenser(people, tops));
 
-    await tx(['people', 'competitors', 'entries'], 'readwrite', (ppl, cmp, ent) => {
-      if (isNew) ppl.put(person);
+    await tx(['people', 'competitors', 'entries', 'meta'], 'readwrite', (ppl, cmp, ent, meta) => {
+      if (isNew || granted) ppl.put(person);
+      if (granted) meta.put({ key: FSS_TOP, value: tops });
       cmp.put(competitor);
       clean.disciplines.forEach((d) => ent.put({
         id: newId(), competitionId, competitorId: competitor.id, personId: person.id,
@@ -992,6 +1236,7 @@ export const store = {
       known: !isNew,
       // The same name and year exists under another club.
       elsewhere,
+      fssId: fssIdOf(person, year),
     };
   },
 
@@ -1005,7 +1250,8 @@ export const store = {
    * mistyped year — the entry is re-linked to that person, placements
    * included, so points land on the right ranking row.
    *
-   * @returns {{group:string, added:number, removed:number, teams:number, merged:boolean}}
+   * @returns {{group:string, added:number, removed:number, teams:number, merged:boolean,
+   *            fssId:string|null}}
    */
   async editCompetitor(competitionId, competitorId, patch) {
     const competition = await store.getCompetition(competitionId);
@@ -1019,14 +1265,17 @@ export const store = {
 
     const clean = await store.validateEntry(competition, patch);
 
-    const [people, mine, elsewhere, theirEntries, theirResults, teams] = await Promise.all([
-      all('people'),
-      allBy('competitors', 'competitionId', competitionId),
-      allBy('competitors', 'personId', competitor.personId),
-      allBy('entries', 'competitorId', competitorId),
-      allBy('results', 'competitionId', competitionId),
-      allBy('teams', 'competitionId', competitionId),
-    ]);
+    const [people, mine, elsewhere, theirEntries, theirResults, teams, competitions, tops] =
+      await Promise.all([
+        all('people'),
+        allBy('competitors', 'competitionId', competitionId),
+        allBy('competitors', 'personId', competitor.personId),
+        allBy('entries', 'competitorId', competitorId),
+        allBy('results', 'competitionId', competitionId),
+        allBy('teams', 'competitionId', competitionId),
+        all('competitions'),
+        metaGet(FSS_TOP, {}),
+      ]);
 
     const person = people.find((p) => p.id === competitor.personId) || null;
     // The club is part of identity, so correcting it changes identity —
@@ -1034,11 +1283,34 @@ export const store = {
     // the difference between a correction (the editor knows it is the
     // same person) and an import (it cannot know).
     const identity = identityOf({ ...clean, licence: person?.licence || null });
-    const twin = people.find((p) => p.identity === identity && p.id !== competitor.personId);
+    const twin = people.find((p) => p.id !== competitor.personId
+      && (p.identity === identity || (p.aliases || []).includes(identity)));
     if (twin && mine.some((c) => c.personId === twin.id && c.id !== competitorId)) {
       throw new Error(`${clean.name} (${clean.year}) je već prijavljen na ovo takmičenje.`);
     }
     const personId = twin ? twin.id : competitor.personId;
+
+    // Two records of one person merge into one FSS ID for the year: the
+    // twin's own, else the one this entry was given, else a new number.
+    // The old record lets go of its ID unless it still competes that year.
+    const year = seasonOf(competition);
+    const yearOf = new Map(competitions.map((c) => [c.id, seasonOf(c)]));
+    const others = elsewhere.filter((c) => c.id !== competitorId);
+    const stays = !!person && others.length > 0;
+    let survivor = null;
+    let leaving = null;
+    let granted = false;
+    if (twin) {
+      const own = fssIdOf(person, year);
+      const handOver = own && !others.some((c) => yearOf.get(c.competitionId) === year) ? own : null;
+      if (handOver && stays) leaving = { ...person, fssIds: person.fssIds.filter((id) => id !== handOver) };
+      if (!fssIdOf(twin, year)) {
+        survivor = { ...twin };
+        if (handOver) survivor.fssIds = [...(twin.fssIds || []), handOver];
+        else granted = grantFssId(survivor, year, fssDispenser(people, tops));
+        if (!handOver && !granted) survivor = null;
+      }
+    }
 
     // Entries: what stays, what goes, what is added.
     const wanted = new Map(clean.disciplines.map((d) => [d.name, d]));
@@ -1070,16 +1342,22 @@ export const store = {
           : m));
     });
 
-    await tx(['people', 'competitors', 'entries', 'results', 'teams'], 'readwrite',
-      (ppl, cmp, ent, res, tms) => {
+    await tx(['people', 'competitors', 'entries', 'results', 'teams', 'meta'], 'readwrite',
+      (ppl, cmp, ent, res, tms, meta) => {
         if (twin) {
           // A person left with no entries anywhere has no reason to
           // stay in the database.
-          if (person && !elsewhere.some((c) => c.id !== competitorId)) ppl.delete(person.id);
+          if (person && !stays) ppl.delete(person.id);
+          else if (leaving) ppl.put(leaving);
+          // Only after the old record let go of its ID — no ID is ever
+          // held by two people, not even inside one transaction.
+          if (survivor) ppl.put(survivor);
+          if (granted) meta.put({ key: FSS_TOP, value: tops });
         } else if (person) {
           ppl.put({
             ...person, identity, name: clean.name, sex: clean.sex,
             year: clean.year, club: clean.club,
+            ...(person.aliases ? { aliases: person.aliases.filter((a) => a !== identity) } : {}),
           });
         }
 
@@ -1103,6 +1381,7 @@ export const store = {
       removed: removed.length,
       teams: touchedTeams.length,
       merged: !!twin,
+      fssId: fssIdOf(survivor || twin || person, year),
     };
   },
 
@@ -1270,7 +1549,7 @@ export const store = {
     // immediately, whatever the list and whether the competition is done.
     const scoring = new Set(competitions.filter(pointsCounted).map((c) => c.id));
     const teamById = new Map(teams.map((t) => [t.id, t]));
-    const personByIdentity = new Map(register.map((p) => [p.identity, p]));
+    const personByIdentity = identityIndex(register);
 
     const blank = () => ({ zlato: 0, srebro: 0, bronza: 0, ucesce: 0, medalje: 0, bodovi: 0 });
     const add = (tally, placement, scores) => {
@@ -1377,7 +1656,7 @@ export const store = {
     const competitorById = new Map(competitors.map((c) => [c.id, c]));
     const entryById = new Map(entries.map((e) => [e.id, e]));
     const teamById = new Map(teams.map((t) => [t.id, t]));
-    const personByIdentity = new Map(register.map((p) => [p.identity, p]));
+    const personByIdentity = identityIndex(register);
 
     const blank = (name) => ({
       name,
@@ -1632,7 +1911,7 @@ export const store = {
       .map((e) => [e.id, e]));
     const teamById = new Map(teams.filter((t) => ids.has(t.competitionId))
       .map((t) => [t.id, t]));
-    const personByIdentity = new Map(register.map((p) => [p.identity, p]));
+    const personByIdentity = identityIndex(register);
 
     const blank = () => ({ zlato: 0, srebro: 0, bronza: 0, ucesce: 0, medalje: 0, bodovi: 0 });
     const score = (row, placement, scores) => {
@@ -1695,7 +1974,7 @@ export const store = {
         teamMembersOf(team, personByIdentity).forEach((p) => {
           if (!people.has(p.id)) {
             const member = (team.members || []).find((m) =>
-              identityOf({ ...m, club: team.club }) === p.identity) || {};
+              personByIdentity.get(identityOf({ ...m, club: team.club })) === p) || {};
             people.set(p.id, {
               personId: p.id, ...blank(),
               nastupa: 0, clubs: new Set([team.club]), lastDate: '',
@@ -1790,7 +2069,8 @@ async function pruneOrphanPeople() {
   const used = new Set(competitors.map((c) => c.personId));
   const memberIdentities = new Set(teams.flatMap((t) =>
     (t.members || []).map((m) => identityOf({ ...m, club: t.club }))));
-  const orphans = people.filter((p) => !used.has(p.id) && !memberIdentities.has(p.identity));
+  const orphans = people.filter((p) => !used.has(p.id) && !memberIdentities.has(p.identity)
+    && !(p.aliases || []).some((a) => memberIdentities.has(a)));
   if (!orphans.length) return;
   await tx('people', 'readwrite', (os) => orphans.forEach((p) => os.delete(p.id)));
 }

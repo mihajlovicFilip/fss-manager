@@ -19,6 +19,7 @@ exactly as it does in the office.
 - [Running the application](#running-the-application)
 - [Running a competition](#running-a-competition)
 - [Screens](#screens)
+- [The FSS ID](#the-fss-id)
 - [The rulebook](#the-rulebook)
 - [The Excel entry form](#the-excel-entry-form)
 - [Seasonal maintenance](#seasonal-maintenance)
@@ -81,7 +82,8 @@ register immediately, and the other way round.
 The blank form is downloaded with the **Prazan formular za klubove** button on
 the *Uvoz prijava* screen, or taken from `form/FSS-Entry-Form.xlsx`. Clubs fill
 it in Excel on their own machines — they never open the application and do not
-need to have it.
+need to have it. Next to each competitor the coach writes their
+[FSS ID](#the-fss-id) if they have one.
 
 ### 3. Import the entries
 
@@ -117,7 +119,9 @@ Import rules:
   them apart. The cost is deliberate and stated: somebody who changes clubs
   starts a new record, with points from zero. The import never decides that
   quietly — it names every such case with both clubs, so the editor knows whether
-  they are looking at a namesake or a transfer.
+  they are looking at a namesake or a transfer. **With the person's FSS ID on the
+  form the doubt is gone**: the ID says it is the same person, the transfer is
+  recorded and the points follow them (see [The FSS ID](#the-fss-id)).
 - **Importing the same file twice creates no duplicates**, so a club may send a
   corrected form.
 - **A file that is not a form does not abort the import** — it appears in the
@@ -153,7 +157,9 @@ The correction reaches everywhere the entry is repeated: the competitor record,
 every one of their entry rows, their placements, and their details inside any
 team they are a member of. If the correction turns them into somebody the
 database already knows — which is exactly what fixing a mistyped year does — the
-entry is re-linked to that person, so the points land on the right ranking row.
+entry is re-linked to that person, so the points land on the right ranking row,
+and the person is left with one FSS ID for the year. The FSS ID itself is shown
+in the dialog but never edited.
 
 > **Entries freeze when they close.** Moving the competition to *Prijave
 > zatvorene* (entries closed) on the dashboard ends both correcting and importing:
@@ -328,7 +334,7 @@ A separate page (`documents.html`) holds the official documents laid out for A4:
 
 | Document                 | Orientation | Contents                                                    |
 | ------------------------ | ----------- | ----------------------------------------------------------- |
-| Prijave po klubovima     | portrait    | one document per club — its entries and teams, with a confirmation column |
+| Prijave po klubovima     | portrait    | one document per club — its entries and teams with their FSS IDs, and a confirmation column |
 | Kotizacije               | portrait    | one bill per club — fees per competitor, teams, refund and amount payable |
 | Prijave po kategorijama  | portrait    | one document per category, with a placement column           |
 | Prijave po disciplinama  | portrait    | one document per discipline, its categories one after another |
@@ -370,7 +376,7 @@ worse than no list at all.
 | **Kontrolna tabla**     | dashboard: current competition, figures derived from the entry register, and checks that find what needs correcting |
 | **Takmičenja**          | competition register: create, select the current one, delete                 |
 | **Uvoz prijava**        | read completed club forms and write them into the chosen competition         |
-| **Takmičari**           | competitor list with medals and points; a name opens that person's record across all seasons, *Izmeni* corrects an entry and *+ Nova prijava* writes a new one, while entries are open |
+| **Takmičari**           | competitor list with FSS IDs, medals and points, searchable by name, club or FSS ID; a name opens that person's record across all seasons, *Izmeni* corrects an entry and *+ Nova prijava* writes a new one, while entries are open |
 | **Klubovi**             | competitors, medals and points per club                                      |
 | **Žreb / Tabele**       | brackets per category, random draw and printing                              |
 | **Tatami**              | assignment of categories to mats                                             |
@@ -383,6 +389,52 @@ worse than no list at all.
 
 Screens are selected by hash route (`#zreb`, `#uvoz` …), so each is linkable and
 survives a reload. An unknown route falls back to the dashboard.
+
+---
+
+## The FSS ID
+
+Every competitor carries a yearly federation number: **FSS-125/26** is
+competitor 125 of 2026.
+
+- **One per person per calendar year.** The year is the competition's, as for
+  age groups — not the ranking season. Each year numbers from 1 again, so
+  FSS-1/26 and FSS-1/27 are two different IDs. Last year's ID stays on the
+  record as history, and the record card lists them by year.
+- **Only the application hands numbers out**, the moment somebody is entered —
+  by import or *+ Nova prijava* — never a club. The next number is one above the
+  highest ever given that year, so a number is never used twice, not even after
+  its holder is deleted. The ID is not editable anywhere.
+- **Clubs learn it from paper.** It is printed on *Prijave po klubovima*, the
+  sheet the coach checks and signs at the competition, and on the full list of
+  competitors. The *Takmičari* screen shows it and searches by it.
+- **On the form** the *FSS ID* column takes this year's ID — or last year's,
+  until the club has the new one. A newcomer leaves it empty. The ID does not
+  replace the rest of the row; name, year and everything else are still filled
+  in.
+- **On import** an ID names a person only when it agrees with the row's name
+  and year of birth (Petrovic and Petrović agree):
+  - this year's or an older ID of that person — that person, whichever club the
+    form is from. Another club is a transfer: it is named in the report, and the
+    person keeps their ID and their points;
+  - somebody else's ID — the row is not imported; the preview marks it with its
+    Excel row number before anything is written;
+  - a malformed ID, or one nobody has — ignored, the row is matched by name as
+    before, and the report says so.
+
+  Rows without an ID are matched exactly as before, and a form from before the
+  column existed imports as it always did.
+
+The first launch of the version that introduced IDs numbers everybody already
+entered at a competition from 2026 on — competitions by date, competitors in
+alphabetical order, team members after them. Competitions before 2026 carry no
+IDs.
+
+Under the hood the IDs live on the person, as a list of the IDs themselves
+(`fssIds: ['FSS-81/25', 'FSS-125/26']`): the year is part of the ID, so the list
+is the history. The database keeps a unique index over that list, so it refuses
+to store two people with the same ID; the highest number handed out each year is
+remembered in `meta` (`fssTop`).
 
 ---
 
@@ -500,8 +552,10 @@ remember it:
   requested season.
 - **The name field accepts letters only**, plus space, hyphen and apostrophe;
   digits are rejected on entry.
-- **The Provera column** verifies that the entry is complete and states in a
-  full sentence what is missing.
+- **The FSS ID column** comes after everything else that is typed. It is
+  optional; whose ID it is, only the application can check, on import.
+- **The Provera column** verifies that the entry is complete — including the
+  shape of an FSS ID — and states in a full sentence what is missing.
 - **Writing is possible only where intended** — both sheets are protected
   without a password, and only the input cells are unlocked.
 
@@ -539,6 +593,10 @@ The demo competitions sit in the same database as real ones, so **Klubovi** and
 **Rang lista**, which aggregate across seasons, mix invented figures with actual
 ones. Delete both demo competitions on the *Takmičenja* screen before starting
 work — deleting a competition also removes its entries, competitors and teams.
+
+The demo's 2026 competitors also hold FSS IDs, and a number once given is never
+given again — so while the demo is in the database, real competitors in 2026
+are numbered after it. From 2027 on, numbering starts from 1 regardless.
 
 ### A new season
 
@@ -639,13 +697,13 @@ Serbian.
 
 ```
 people        one person, once. Lives above competitions and is how points
-              accumulate across seasons.
+              accumulate across seasons. Carries the yearly FSS IDs.
 competitors   that person at one competition (club, belt, age on the day)
 entries       one entry = one competitor in one discipline
 results       a placement on one entry; points are derived from it
 teams         team entries
 competitions  the competitions themselves
-meta          current competition, mat plan, seasons
+meta          current competition, mat plan, seasons, highest FSS ID per year
 ```
 
 `assets/js/store.js` is the **only seam** between the application and its data.
@@ -694,6 +752,16 @@ correctly — and **imports twice without creating a duplicate**; the dashboard
 figures equal what is actually in the database; every document type prints to
 PDF with nothing clipped on any sheet; and not a single request leaves the
 local server.
+
+The FSS ID gets its own run through the same real form and import screen:
+numbering from 1 without gaps in a fixed order; a form carrying a person's own
+ID (spelled without diacritics), somebody else's ID, a malformed ID and an
+unknown one; a transfer to another club; the turn of the year, where last
+year's ID recognises the person and the new year numbers from 1; a deleted
+person's number not coming back; a merge leaving one ID for the year; the
+database refusing a second holder of an ID; a form without the ID column; and
+the ID on screen — the column, the search, the correction dialog and the record
+card.
 
 The import fixture is built **from the same form** that is distributed to clubs,
 which incidentally verifies that its sheets and column headers are where the

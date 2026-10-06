@@ -33,7 +33,7 @@ export const DEMO_VERSION = 6;
  * to see whether the browser is serving the current build or a cached
  * one. Bumped together with CACHE in sw.js.
  */
-export const APP_VERSION = 'v65';
+export const APP_VERSION = 'v66';
 
 export const SEED_COMPETITION = {
   name: 'Prvenstvo Srbije 2026',
@@ -464,6 +464,107 @@ export const categoryKey = (e) => {
   if (drawBy === 'level') return `${e.discipline}|${e.group}|${e.sex}|${e.level}`;
   return `${e.discipline}|${e.group}|${e.sex}`;
 };
+
+// === FSS ID =============================================
+
+/*
+ * The federation's yearly competitor number: FSS-125/26 is competitor 125
+ * of 2026. A person gets one number per calendar year — the year of the
+ * competition, not the ranking season — and a new one every year; last
+ * year's stays on the record as history. Only the app hands numbers out,
+ * never a club, and a number given once is never given again that year,
+ * not even after the person is deleted.
+ *
+ * Stored on the person as the IDs themselves (fssIds: ['FSS-81/25',
+ * 'FSS-125/26']): the year is part of the ID, so the list is the history,
+ * and the database can index it to keep every ID unique.
+ */
+
+/** The first year numbers are handed out; older competitions keep none. */
+export const FSS_ID_SINCE = 2026;
+
+/** FSS-125/26 for number 125 in 2026. */
+export const fssId = (year, number) => `FSS-${number}/${String(year % 100).padStart(2, '0')}`;
+
+/**
+ * Reads an ID as somebody typed it: "FSS-125/26", in any case, spaces
+ * around it allowed. FSS-0/26, FSS-A/26, FSS-10 and 10/26 are not IDs.
+ * Returns the ID written the one way the app writes it, plus its number
+ * and year.
+ */
+export function parseFssId(value) {
+  const m = /^FSS-\s*(\d+)\s*\/(\d{2})$/i.exec(String(value ?? '').trim());
+  if (!m || Number(m[1]) < 1) return null;
+  const year = 2000 + Number(m[2]);
+  return { id: fssId(year, Number(m[1])), number: Number(m[1]), year };
+}
+
+/** The person's ID for one year, or null. */
+export const fssIdOf = (person, year) =>
+  (person?.fssIds || []).find((id) => parseFssId(id)?.year === year) || null;
+
+/** A person's IDs, newest year first: [{ year: 2027, id: 'FSS-37/27' }, …]. */
+export const fssHistory = (person) => (person?.fssIds || [])
+  .map((id) => ({ id, year: parseFssId(id)?.year || 0 }))
+  .sort((a, b) => b.year - a.year);
+
+/**
+ * The next number for a year: one above the highest ever handed out —
+ * not the number of people, and never a gap a deleted person left.
+ * `top` is the remembered highest, which outlives deletions; the IDs are
+ * checked as well, so a lost counter still cannot repeat a number.
+ */
+export function nextFssNumber(ids, year, top = 0) {
+  let highest = top;
+  for (const id of ids) {
+    const parsed = parseFssId(id);
+    if (parsed && parsed.year === year) highest = Math.max(highest, parsed.number);
+  }
+  return highest + 1;
+}
+
+/**
+ * Two spellings of one name compare equal: lower case, no diacritics,
+ * letters only — "Petrovic" and "Petrović" match, "Marko Petrović" and
+ * "Petar Petrović" do not.
+ */
+export const nameKey = (value) => String(value ?? '').toLocaleLowerCase('sr')
+  .replace(/đ/g, 'dj')
+  .normalize('NFD').replace(/\p{M}/gu, '')
+  .replace(/[^\p{L}]/gu, '');
+
+/**
+ * What an ID written on a form says about its row. The ID names a person
+ * only when it agrees with the row's name and birth year — a mistyped
+ * number must not move entries and points onto somebody else.
+ *
+ *   none      no ID on the row
+ *   invalid   not an ID at all — ignored, the row is matched by name
+ *   unknown   nobody has this ID — ignored the same way
+ *   conflict  the ID belongs to somebody else — the row is not imported
+ *   match     the ID's owner is this row; `old` when the ID is from
+ *             another year (a club writes last year's until it has the
+ *             new one), `current` is the owner's ID for this year, if any
+ *
+ * @param {{fss: string, name: string, year: number}} row
+ * @param {number} year       the competition's year
+ * @param {Function} ownerOf  ID → person, or null
+ */
+export function fssVerdict(row, year, ownerOf) {
+  const typed = String(row.fss ?? '').trim();
+  if (!typed) return { status: 'none' };
+  const parsed = parseFssId(typed);
+  if (!parsed) return { status: 'invalid', typed };
+  const person = ownerOf(parsed.id);
+  if (!person) return { status: 'unknown', id: parsed.id };
+  if (nameKey(person.name) !== nameKey(row.name) || Number(person.year) !== Number(row.year)) {
+    return { status: 'conflict', id: parsed.id, person };
+  }
+  return {
+    status: 'match', id: parsed.id, person,
+    old: parsed.year !== year, from: parsed.year, current: fssIdOf(person, year),
+  };
+}
 
 // === Demo registry =============================================
 
