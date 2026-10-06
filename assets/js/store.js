@@ -33,7 +33,7 @@ import {
   disciplinesForGroup, categoryKey, pointsFor, placementByKey, calendarOf, labelTeams,
   clubByName, groupOfYear, SEASON, DIPLOMA_DEFAULT, pointsCounted, BELTS, WEIGHTS,
   levelOfBelt, seasonOf, entriesOpen, FEES_DEFAULT, properName,
-  FSS_ID_SINCE, fssId, fssIdOf, nextFssNumber, fssVerdict,
+  FSS_ID_SINCE, fssId, fssIdOf, nextFssNumber, fssVerdict, nameWords, nameParts,
 } from './data.js';
 
 /** The demo includes one past-season competition, split by its table. */
@@ -190,9 +190,26 @@ const newId = () => (crypto.randomUUID
  * year. The known cost: whoever changes club starts as a new record,
  * points from zero. The import names every such case (transfers) instead
  * of deciding quietly.
+ *
+ * The name counts by its words, not their order: "Petar Petrović" and
+ * "Petrović Petar" are one person.
  */
-const looseIdentity = (person) =>
-  `nm:${String(person.name).trim().toLowerCase()}|${person.year}`;
+const looseIdentity = (person) => `nm:${nameWords(person.name)}|${person.year}`;
+
+/** An identity written before word order stopped counting, rewritten. */
+const reorderedIdentity = (identity) => String(identity)
+  .replace(/^nm:([^|]*)/, (match, name) => `nm:${nameWords(name)}`);
+
+/**
+ * How a name is written on a record. A person the database knows keeps
+ * the order it has for them, so a form that swapped first name and
+ * surname still lists them the right way round; otherwise as written.
+ */
+function writtenName(row, person) {
+  const source = person && nameWords(row.name) === nameWords(person.name) ? person : row;
+  const { first, last } = nameParts(source);
+  return { name: source.name, firstName: first, lastName: last };
+}
 
 const identityOf = (person) => {
   if (person.licence) return `lic:${String(person.licence).trim().toUpperCase()}`;
@@ -231,11 +248,12 @@ const identityIndex = (people) => {
  * Migrates existing people to club-carrying identities. An older database
  * has identities without the club; unmigrated, the next import would see
  * everyone as unknown and duplicate them. The club comes from the most
- * recent appearance.
+ * recent appearance. Version 3 stopped word order from counting, so every
+ * identity — and every alias — is written again.
  */
 async function migrateIdentities() {
   const done = await metaGet('identityVersion', 0);
-  if (done >= 2) return;
+  if (done >= 3) return;
 
   const [people, competitors] = await Promise.all([all('people'), all('competitors')]);
   const byPerson = new Map();
@@ -247,12 +265,15 @@ async function migrateIdentities() {
 
   const updated = people.map((p) => {
     const club = p.club || byPerson.get(p.id)?.club || '';
-    return { ...p, club, identity: identityOf({ ...p, club }) };
+    const identity = identityOf({ ...p, club });
+    const aliases = p.aliases
+      && [...new Set(p.aliases.map(reorderedIdentity))].filter((a) => a !== identity);
+    return { ...p, club, identity, ...(aliases ? { aliases } : {}) };
   });
 
   await tx(['people', 'meta'], 'readwrite', (ppl, meta) => {
     updated.forEach((r) => ppl.put(r));
-    meta.put({ key: 'identityVersion', value: 2 });
+    meta.put({ key: 'identityVersion', value: 3 });
   });
 }
 
@@ -393,7 +414,8 @@ function registryRecords(competitionId, seed) {
   const competitors = registry.competitors.map((c) => {
     const person = {
       id: newId(), identity: identityOf(c),
-      name: c.name, sex: c.sex, year: c.year, club: c.club || '', licence: c.licence,
+      name: c.name, firstName: c.firstName, lastName: c.lastName,
+      sex: c.sex, year: c.year, club: c.club || '', licence: c.licence,
     };
     people.push(person);
     return { ...c, id: newId(), competitionId, personId: person.id };
@@ -490,7 +512,8 @@ function seedPastCompetition(people, competitors) {
     const club = moved || !now ? other : now;
     const competitor = {
       id: newId(), competitionId, personId: person.id,
-      name: person.name, sex: person.sex, year, group,
+      name: person.name, firstName: person.firstName, lastName: person.lastName,
+      sex: person.sex, year, group,
       club: club.name, city: club.city, coach: club.coach,
       belt: belts[i % belts.length], level: '', licence: person.licence,
     };
@@ -501,7 +524,8 @@ function seedPastCompetition(people, competitors) {
 
     picks.forEach((d) => entries.push({
       id: newId(), competitionId, competitorId: competitor.id, personId: person.id,
-      name: competitor.name, sex: competitor.sex, year, group,
+      name: competitor.name, firstName: competitor.firstName, lastName: competitor.lastName,
+      sex: competitor.sex, year, group,
       club: competitor.club, city: competitor.city, coach: competitor.coach,
       belt: competitor.belt, level: competitor.level,
       discipline: d.name, weight: null,
@@ -974,13 +998,14 @@ export const store = {
           transfers.push({ name: c.name, year: c.year, from: elsewhere[0].club || '', to: club });
         }
         person = {
-          id: newId(), identity, name: c.name, sex: c.sex, year: c.year,
+          id: newId(), identity, ...writtenName(c, c), sex: c.sex, year: c.year,
           club, licence: null,
         };
         index(person);
         newPeople.push(person);
       }
       give(person);
+      const named = writtenName(c, person);
 
       // The age group is computed from the year here too, never taken
       // from the file — the rulebook is the only source.
@@ -990,7 +1015,7 @@ export const store = {
       if (!competitor) {
         competitor = {
           id: newId(), competitionId, personId: person.id,
-          name: c.name, sex: c.sex, year: c.year, group,
+          ...named, sex: c.sex, year: c.year, group,
           club, city, coach, belt: c.belt, level: c.level,
           // Weight belongs to the competitor; the club enters it with a
           // weight-drawn discipline — the first such is taken.
@@ -1009,7 +1034,7 @@ export const store = {
           discipline: d.name, weight: d.weight || null,
           // A flat row, like the seeded entries — lists and documents
           // read from here with no joins.
-          name: c.name, sex: c.sex, year: c.year, group,
+          ...named, sex: c.sex, year: c.year, group,
           club, city, coach, belt: c.belt, level: c.level,
         });
       });
@@ -1019,8 +1044,9 @@ export const store = {
     // placement would have nobody to credit. Recognised by the same
     // identity as individual entries; a namesake from another club is
     // named here as well, never resolved quietly.
+    const membersOf = new Map();
     (payload.teams || []).forEach((t) => {
-      (t.members || []).forEach((m) => {
+      membersOf.set(t, (t.members || []).map((m) => {
         const identity = identityOf({ ...m, club });
         let person = candidatesOf(identity)[0] || null;
         if (!person) {
@@ -1030,27 +1056,31 @@ export const store = {
             transfers.push({ name: m.name, year: m.year, from: elsewhere[0].club || '', to: club });
           }
           person = {
-            id: newId(), identity, name: m.name, sex: m.sex, year: m.year,
+            id: newId(), identity, ...writtenName(m, m), sex: m.sex, year: m.year,
             club, licence: null,
           };
           index(person);
           newPeople.push(person);
         }
         give(person);
-      });
+        // The team keeps the member as the database knows them.
+        return { ...m, ...writtenName(m, person) };
+      }));
     });
 
     // The same team is the same discipline, group, variant, club and
     // members. A club may enter two teams in one category, so the
     // members are what tells them apart.
     const teamKey = (t) => [t.discipline, t.group, t.variant, t.club,
-      (t.members || []).map((m) => m.name).sort().join('|')].join('§');
+      (t.members || []).map((m) => nameWords(m.name)).sort().join('|')].join('§');
     const haveTeams = new Set(theirTeams.map(teamKey));
     const newTeams = [];
     let teamsSkipped = 0;
 
     (payload.teams || []).forEach((t) => {
-      const record = { ...t, id: newId(), competitionId, club, city, coach };
+      const record = {
+        ...t, members: membersOf.get(t), id: newId(), competitionId, club, city, coach,
+      };
       if (haveTeams.has(teamKey(record))) { teamsSkipped += 1; return; }
       haveTeams.add(teamKey(record));
       newTeams.push(record);
@@ -1102,19 +1132,25 @@ export const store = {
    */
   async validateEntry(competition, patch) {
     const season = seasonOf(competition);
-    // The name is normalised before any check and before identity, so
-    // "MARKO MARKOVIĆ" and "Marko Marković" are stored the same, not
-    // just recognised as the same person.
-    const name = properName(patch.name);
+    // First name and surname arrive apart; a caller with the whole name
+    // has it split at the last space. Each is normalised before any check
+    // and before identity, so "MARKO MARKOVIĆ" and "Marko Marković" are
+    // stored the same, not just recognised as the same person.
+    const parts = patch.firstName !== undefined || patch.lastName !== undefined
+      ? { first: patch.firstName, last: patch.lastName } : nameParts({ name: patch.name });
+    const firstName = properName(parts.first);
+    const lastName = properName(parts.last);
+    const name = `${firstName} ${lastName}`.trim();
     const year = Number(patch.year) || 0;
     const group = groupOfYear(year, season);
     const sex = patch.sex === 'M' || patch.sex === 'Ž' ? patch.sex : '';
     const belt = BELTS.indexOf(patch.belt) >= 0 ? patch.belt : '';
 
-    if (!name) throw new Error('Nije uneto ime i prezime.');
-    if (!/^[\p{L}\s'-]+$/u.test(name)) {
-      throw new Error(`Ime „${name}" sadrži znakove koji nisu slova.`);
-    }
+    if (!firstName) throw new Error('Nije uneto ime.');
+    if (!lastName) throw new Error('Nije uneto prezime.');
+    const letters = /^[\p{L}\s'-]+$/u;
+    if (!letters.test(firstName)) throw new Error(`Ime „${firstName}" sadrži znakove koji nisu slova.`);
+    if (!letters.test(lastName)) throw new Error(`Prezime „${lastName}" sadrži znakove koji nisu slova.`);
     if (!year) throw new Error('Nije izabrano godište.');
     if (!group) throw new Error(`Godište ${year} nije obuhvaćeno uzrasnom tabelom.`);
     if (!sex) throw new Error('Nije izabran pol.');
@@ -1143,7 +1179,7 @@ export const store = {
 
     const club = clubByName(patch.club);
     return {
-      name, sex, year, group, belt,
+      name, firstName, lastName, sex, year, group, belt,
       level: levelOfBelt(belt),
       weight: weight || null,
       club: patch.club || '',
@@ -1187,7 +1223,9 @@ export const store = {
     const busy = new Set(mine.map((c) => c.personId));
     const already = mine.find((c) => candidates.some((p) => p.id === c.personId));
     if (already) {
-      throw new Error(`${clean.name} (${clean.year}) je već prijavljen`
+      // Named as entered there — with first name and surname swapped it
+      // must still be clear who it is.
+      throw new Error(`${already.name} (${clean.year}) je već prijavljen`
         + ` za ${already.club} — ispravi postojeću prijavu.`);
     }
 
@@ -1200,14 +1238,15 @@ export const store = {
     const isNew = !person;
     if (isNew) {
       person = {
-        id: newId(), identity, name: clean.name, sex: clean.sex, year: clean.year,
+        id: newId(), identity, ...writtenName(clean, clean), sex: clean.sex, year: clean.year,
         club: clean.club, licence: null,
       };
     }
+    const named = writtenName(clean, person);
 
     const competitor = {
       id: newId(), competitionId, personId: person.id,
-      name: clean.name, sex: clean.sex, year: clean.year, group: clean.group,
+      ...named, sex: clean.sex, year: clean.year, group: clean.group,
       club: clean.club, city: clean.city, coach: clean.coach,
       belt: clean.belt, level: clean.level, weight: clean.weight,
     };
@@ -1222,7 +1261,7 @@ export const store = {
         id: newId(), competitionId, competitorId: competitor.id, personId: person.id,
         discipline: d.name, weight: d.weight,
         // A flat row, like the import — lists and documents read from here.
-        name: clean.name, sex: clean.sex, year: clean.year, group: clean.group,
+        ...named, sex: clean.sex, year: clean.year, group: clean.group,
         club: clean.club, city: clean.city, coach: clean.coach,
         belt: clean.belt, level: clean.level,
       }));
@@ -1320,7 +1359,8 @@ export const store = {
     const added = clean.disciplines.filter((d) => !have.has(d.name));
 
     const flat = {
-      name: clean.name, sex: clean.sex, year: clean.year, group: clean.group,
+      name: clean.name, firstName: clean.firstName, lastName: clean.lastName,
+      sex: clean.sex, year: clean.year, group: clean.group,
       club: clean.club, city: clean.city, coach: clean.coach,
       belt: clean.belt, level: clean.level,
     };
@@ -1328,18 +1368,20 @@ export const store = {
     const keptIds = new Set(kept.map((e) => e.id));
     // A placement on an entry that no longer exists refers to nothing.
     const goneResults = theirResults.filter((r) => goneIds.has(r.entryId));
-    // Ako je prijava prevezana na drugo lice, plasmani idu za njom.
+    // An entry moved onto another person takes its placements along.
     const movedResults = personId === competitor.personId
       ? [] : theirResults.filter((r) => keptIds.has(r.entryId));
 
     // Teams carry their members inside, so a correction must visit them.
-    const touchedTeams = teams.filter((t) =>
-      (t.members || []).some((m) => m.name === competitor.name && m.year === competitor.year));
+    const isThem = (m) => nameWords(m.name) === nameWords(competitor.name) && m.year === competitor.year;
+    const touchedTeams = teams.filter((t) => (t.members || []).some(isThem));
     touchedTeams.forEach((team) => {
-      team.members = team.members.map((m) => (
-        m.name === competitor.name && m.year === competitor.year
-          ? { ...m, name: clean.name, year: clean.year, belt: clean.belt, sex: clean.sex }
-          : m));
+      team.members = team.members.map((m) => (isThem(m)
+        ? {
+          ...m, name: clean.name, firstName: clean.firstName, lastName: clean.lastName,
+          year: clean.year, belt: clean.belt, sex: clean.sex,
+        }
+        : m));
     });
 
     await tx(['people', 'competitors', 'entries', 'results', 'teams', 'meta'], 'readwrite',
@@ -1355,8 +1397,8 @@ export const store = {
           if (granted) meta.put({ key: FSS_TOP, value: tops });
         } else if (person) {
           ppl.put({
-            ...person, identity, name: clean.name, sex: clean.sex,
-            year: clean.year, club: clean.club,
+            ...person, identity, name: clean.name, firstName: clean.firstName,
+            lastName: clean.lastName, sex: clean.sex, year: clean.year, club: clean.club,
             ...(person.aliases ? { aliases: person.aliases.filter((a) => a !== identity) } : {}),
           });
         }
@@ -1411,7 +1453,8 @@ export const store = {
     const ids = new Set(theirEntries.map((e) => e.id));
     const goneResults = theirResults.filter((r) => ids.has(r.entryId));
     const goneTeams = teams.filter((t) =>
-      (t.members || []).some((m) => m.name === competitor.name && m.year === competitor.year));
+      (t.members || []).some((m) => nameWords(m.name) === nameWords(competitor.name)
+        && m.year === competitor.year));
     const lonely = everywhere.length <= 1;
 
     await tx(['people', 'competitors', 'entries', 'results', 'teams'], 'readwrite',

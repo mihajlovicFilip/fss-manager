@@ -14,7 +14,7 @@ import {
   placementByKey, placementSlots, pointsFor, calendarOf, teamCategoryLabel, teamSizeLabel,
   seasonOf, yearsLabel, DIPLOMA_LINES, DIPLOMA_DEFAULT, entriesOpen, pointsCounted,
   BELTS, CLUBS, WEIGHTS, groupOfYear, levelOfBelt, FEES_DEFAULT,
-  FSS_ID_SINCE, fssIdOf, fssHistory,
+  FSS_ID_SINCE, fssIdOf, fssHistory, nameParts,
 } from './data.js';
 import { store } from './store.js';
 import { cell, col, boardCard, slipLine, uniqueCount, bracketHtml } from './doc-render.js';
@@ -366,13 +366,19 @@ function competitorsHtml({ competition, registry, tally }) {
       const total = row?.total || blank;
       const mine = entriesByCompetitor.get(c.id) || [];
       const age = ageByCode(c.group);
+      const { first, last } = nameParts(c);
+      // Searchable either way round — "Petrović Petar" finds Petar Petrović.
+      const words = [first, last, c.club, c.fssId || '', `${last} ${first}`];
       return `
-      <tr data-print-id="${esc(c.id)}" data-search="${esc([c.name, c.club, c.fssId || ''].join(' ').toLowerCase())}">
+      <tr data-print-id="${esc(c.id)}" data-search="${esc(words.join(' ').toLowerCase())}">
         <td class="col-num">${i + 1}</td>
-        <td class="col-name">
-          <button type="button" class="link-cell" data-person="${esc(c.personId)}">${esc(c.name)}</button>
-        </td>
         <td class="col-id">${c.fssId ? esc(c.fssId) : '<span class="text-muted">—</span>'}</td>
+        <td class="col-name">
+          <button type="button" class="link-cell" data-person="${esc(c.personId)}">${esc(first)}</button>
+        </td>
+        <td class="col-name">
+          <button type="button" class="link-cell" data-person="${esc(c.personId)}">${esc(last)}</button>
+        </td>
         <td>${esc(c.club)}</td>
         <td title="${esc(age ? age.name : '')}">${esc(c.group)}</td>
         <td class="col-num">${esc(c.year)}</td>
@@ -401,8 +407,9 @@ function competitorsHtml({ competition, registry, tally }) {
       <thead>
         <tr>
           <th class="col-num">#</th>
-          <th>Ime i prezime</th>
           <th title="Godišnji ID takmičara za ${esc(seasonOf(competition))}. godinu">FSS ID</th>
+          <th>Ime</th>
+          <th>Prezime</th>
           <th>Klub</th>
           <th title="Uzrasna grupa">Grupa</th>
           <th class="col-num">Godište</th>
@@ -450,29 +457,27 @@ function competitorsHtml({ competition, registry, tally }) {
         <div class="form-grid">
           <div class="field-row">
             <div class="field">
-              <label class="field-label" for="e-name">Ime i prezime</label>
-              <input class="control" id="e-name" name="name" value="${esc(competitor.name)}">
+              <label class="field-label" for="e-first">Ime</label>
+              <input class="control" id="e-first" name="firstName" value="${esc(nameParts(competitor).first)}">
             </div>
             <div class="field">
-              <label class="field-label" for="e-club">Klub</label>
-              <select class="control" id="e-club" name="club">${clubs.map((c) => `
-                <option value="${esc(c)}"${c === competitor.club ? ' selected' : ''}>${esc(c)}</option>`).join('')}
-              </select>
+              <label class="field-label" for="e-last">Prezime</label>
+              <input class="control" id="e-last" name="lastName" value="${esc(nameParts(competitor).last)}">
             </div>
           </div>
 
           <div class="field-row">
             <div class="field">
+              <label class="field-label" for="e-year">Godište</label>
+              <select class="control" id="e-year" name="year">${years.map((y) => `
+                <option value="${y}"${y === Number(competitor.year) ? ' selected' : ''}>${y}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field">
               <label class="field-label" for="e-sex">Pol</label>
               <select class="control" id="e-sex" name="sex">
                 <option value="M"${competitor.sex === 'M' ? ' selected' : ''}>muški</option>
                 <option value="Ž"${competitor.sex === 'Ž' ? ' selected' : ''}>ženski</option>
-              </select>
-            </div>
-            <div class="field">
-              <label class="field-label" for="e-year">Godište</label>
-              <select class="control" id="e-year" name="year">${years.map((y) => `
-                <option value="${y}"${y === Number(competitor.year) ? ' selected' : ''}>${y}</option>`).join('')}
               </select>
             </div>
           </div>
@@ -485,6 +490,15 @@ function competitorsHtml({ competition, registry, tally }) {
               </select>
             </div>
             <div class="field" id="e-weight-field"></div>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="e-club">Klub</label>
+              <select class="control" id="e-club" name="club">${clubs.map((c) => `
+                <option value="${esc(c)}"${c === competitor.club ? ' selected' : ''}>${esc(c)}</option>`).join('')}
+              </select>
+            </div>
           </div>
 
           <div class="field">
@@ -552,7 +566,7 @@ function competitorsHtml({ competition, registry, tally }) {
   form.querySelector('#e-sex').addEventListener('change', paint);
   form.querySelector('#e-belt').addEventListener('change', paint);
   form.querySelector('#e-disciplines').addEventListener('change', paint);
-  form.querySelector('#e-name').focus();
+  form.querySelector('#e-first').focus();
 
   const fail = (message) => {
     box.textContent = message;
@@ -563,7 +577,8 @@ function competitorsHtml({ competition, registry, tally }) {
     event.preventDefault();
     box.hidden = true;
     const patch = {
-      name: form.name.value,
+      firstName: form.querySelector('#e-first').value,
+      lastName: form.querySelector('#e-last').value,
       club: form.club.value,
       sex: form.sex.value,
       year: Number(form.year.value),
@@ -572,7 +587,7 @@ function competitorsHtml({ competition, registry, tally }) {
       disciplines: [...form.querySelectorAll('[name="disciplines"]:checked')]
         .map((input) => input.value),
     };
-    const ime = patch.name.trim();
+    const ime = `${patch.firstName.trim()} ${patch.lastName.trim()}`.trim();
 
     try {
       if (isNew) {
@@ -2210,9 +2225,10 @@ function importFileBlock(r, target) {
  * relayed to the club.
  */
 function importRows(rows, kind) {
+  // The same order as the form, so a row on screen reads like the row in Excel.
   const columns = kind === 'solo'
-    ? [['Red', 'num'], ['Ime i prezime', 'name'], ['FSS ID', ''], ['Pol', 'num'], ['Godište', 'num'],
-      ['Grupa', 'num'], ['Pojas', ''], ['Discipline', ''], ['Stanje', '']]
+    ? [['Red', 'num'], ['FSS ID', ''], ['Ime', 'name'], ['Prezime', 'name'], ['Pol', 'num'],
+      ['Godište', 'num'], ['Grupa', 'num'], ['Pojas', ''], ['Discipline', ''], ['Stanje', '']]
     : [['Red', 'num'], ['Ekipna disciplina', 'name'], ['Vrsta', ''], ['Grupa', 'num'],
       ['Sastav', 'num'], ['Članovi', ''], ['Stanje', '']];
 
@@ -2221,11 +2237,12 @@ function importRows(rows, kind) {
     let cells;
     if (!ok) {
       cells = kind === 'solo'
-        ? [r.excelRow, r.raw, r.fss || '', ...Array(columns.length - 4).fill('')]
+        ? [r.excelRow, r.fss || '', r.first || (r.last ? '' : r.raw), r.last || '',
+          ...Array(columns.length - 5).fill('')]
         : [r.excelRow, r.raw, ...Array(columns.length - 3).fill('')];
     } else if (kind === 'solo') {
       const c = r.competitor;
-      cells = [r.excelRow, c.name, r.fss || '', c.sex, c.year, c.group, c.belt,
+      cells = [r.excelRow, r.fss || '', c.firstName, c.lastName, c.sex, c.year, c.group, c.belt,
         c.disciplines.map((d) => (d.weight ? `${d.name} (${weightLabel(d.weight)})` : d.name)).join(' · ')];
     } else {
       const x = r.team;
@@ -2949,7 +2966,7 @@ function competitorsSpec({ competition, registry, tally }) {
   const search = document.getElementById('competitor-search')?.value.trim() || '';
 
   return {
-    // Fourteen columns do not fit upright without names breaking.
+    // Fifteen columns do not fit upright without names breaking.
     orientation: 'landscape',
     context: competitionContext(competition),
     spec: {
@@ -2960,7 +2977,7 @@ function competitorsSpec({ competition, registry, tally }) {
         calendarOf(competition) === 'B' ? ' · B lista — bez bodovanja' : ''}`,
       docCode: 'Spisak takmičara',
       columns: [
-        col('#', '26px', 'center'), col('Ime i prezime'), col('FSS ID', '74px'), col('Klub'),
+        col('#', '26px', 'center'), col('FSS ID', '74px'), col('Ime'), col('Prezime'), col('Klub'),
         col('Grupa', '46px', 'center'), col('God.', '44px', 'center'), col('Pojas', '54px'),
         col('Prijave', '50px', 'center'), col('Zlato', '46px', 'center'),
         col('Srebro', '48px', 'center'), col('Bronza', '48px', 'center'),
@@ -2970,10 +2987,12 @@ function competitorsSpec({ competition, registry, tally }) {
       rows: rows.map((c, i) => {
         const here = tally.get(c.personId)?.here || blank;
         const total = tally.get(c.personId)?.total || blank;
+        const { first, last } = nameParts(c);
         return {
           zebra: i % 2 === 1,
           cells: [
-            cell(i + 1, 'center'), cell(c.name, 'left', true), cell(c.fssId || '—'), cell(c.club),
+            cell(i + 1, 'center'), cell(c.fssId || '—'), cell(first, 'left', true),
+            cell(last, 'left', true), cell(c.club),
             cell(c.group, 'center'), cell(c.year, 'center'), cell(c.belt),
             numCell(perCompetitor.get(c.id) || 0),
             numCell(here.zlato), numCell(here.srebro), numCell(here.bronza), numCell(here.ucesce),
@@ -3869,7 +3888,7 @@ document.addEventListener('click', async (event) => {
       // A blank entry, with the values one would pick anyway: a year in
       // the middle of the age table, a white belt, the first club.
       competitor: {
-        id: null, name: '', sex: 'M', year: season - 12,
+        id: null, name: '', firstName: '', lastName: '', sex: 'M', year: season - 12,
         belt: 'beli', club: CLUBS[0].name, weight: null,
       },
     });

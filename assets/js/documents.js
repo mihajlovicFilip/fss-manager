@@ -13,16 +13,17 @@
 
 import {
   FEDERATION, WEIGHTS,
-  ageByCode, clubByName, disciplineByName, surnameOf, categoryKey, dateLabel,
-  money, feeCountFor, teamFeeOf,
+  ageByCode, clubByName, disciplineByName, categoryKey, dateLabel,
+  money, feeCountFor, teamFeeOf, nameParts,
 } from './data.js';
 import { store } from './store.js';
 import {
   esc, cell, col, stamp, uniqueCount, renderAllInto, pageWord,
 } from './doc-render.js';
 
+// By surname as it was entered, then by the whole name.
 const bySurnameThenName = (a, b) =>
-  surnameOf(a.name).localeCompare(surnameOf(b.name), 'sr') ||
+  nameParts(a).last.localeCompare(nameParts(b).last, 'sr') ||
   a.name.localeCompare(b.name, 'sr');
 
 const byClubThenSurname = (a, b) =>
@@ -117,11 +118,13 @@ const DOCUMENTS = [
         const teams = registry.teams.filter((t) => t.club === name);
 
         // The FSS ID is on the sheet the coach checks and signs — that is
-        // how the club learns this year's IDs for its next form.
+        // how the club learns this year's IDs for its next form. Columns
+        // follow the form: ID, first name, surname, then the rest.
         const rows = entries.map((e, i) => ({
           zebra: i % 2 === 1,
           cells: [
-            cell(i + 1, 'center'), cell(e.name, 'left', true), cell(e.competitor?.fssId || '—'),
+            cell(i + 1, 'center'), cell(e.competitor?.fssId || '—'),
+            cell(nameParts(e).first, 'left', true), cell(nameParts(e).last, 'left', true),
             cell(e.sex, 'center'), cell(e.year, 'center'), cell(e.belt), cell(e.level),
             cell(e.discipline), cell(e.group, 'center'), cell(null, 'center'),
           ],
@@ -139,9 +142,9 @@ const DOCUMENTS = [
               groupInner: !last,
               groupEnd: last,
               cells: [
-                cell(mi === 0 ? entries.length + ti + 1 : null, 'center'),
-                cell(m.name, 'left', true), cell(m.fssId || '—'), cell(m.sex || '', 'center'),
-                cell(m.year, 'center'), cell(m.belt), cell(''),
+                cell(mi === 0 ? entries.length + ti + 1 : null, 'center'), cell(m.fssId || '—'),
+                cell(nameParts(m).first, 'left', true), cell(nameParts(m).last, 'left', true),
+                cell(m.sex || '', 'center'), cell(m.year, 'center'), cell(m.belt), cell(''),
                 cell(mi === 0
                   ? [team.discipline, team.variantLabel].filter(Boolean).join(' · ')
                   : null),
@@ -166,7 +169,7 @@ const DOCUMENTS = [
             signatures: CLUB_SIGNATURES,
             docCode: `Prijava kluba · ${name}`,
             columns: [
-              col('#', '26px', 'center'), col('Ime i prezime'), col('FSS ID', '70px'),
+              col('#', '26px', 'center'), col('FSS ID', '70px'), col('Ime'), col('Prezime'),
               col('M/Ž', '36px', 'center'), col('Godište', '50px', 'center'), col('Pojas', '54px'),
               col('Nivo', '50px'), col('Disciplina', '80px'), col('Grupa', '44px', 'center'),
               col('Potvrda', '60px', 'center'),
@@ -470,7 +473,7 @@ const DOCUMENTS = [
           signatures: SIGNATURES,
           docCode: 'Spisak takmičara',
           columns: [
-            col('#', '26px', 'center'), col('Ime i prezime'), col('FSS ID', '70px'),
+            col('#', '26px', 'center'), col('FSS ID', '70px'), col('Ime'), col('Prezime'),
             col('Ime kluba'), col('Grad'),
             col('Trener'), col('M/Ž', '38px', 'center'), col('God.', '44px', 'center'),
             col('Pojas', '52px'), col('Nivo', '52px'), col('Disciplina', '78px'),
@@ -479,7 +482,8 @@ const DOCUMENTS = [
           rows: rows.map((e, i) => ({
             zebra: i % 2 === 1,
             cells: [
-              cell(i + 1, 'center'), cell(e.name, 'left', true), cell(e.competitor?.fssId || '—'),
+              cell(i + 1, 'center'), cell(e.competitor?.fssId || '—'),
+              cell(nameParts(e).first, 'left', true), cell(nameParts(e).last, 'left', true),
               cell(e.club), cell(e.city),
               cell(e.coach), cell(e.sex, 'center'), cell(e.year, 'center'), cell(e.belt),
               cell(e.level), cell(e.discipline), cell(e.group, 'center'),

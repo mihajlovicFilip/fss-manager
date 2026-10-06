@@ -33,7 +33,7 @@ export const DEMO_VERSION = 6;
  * to see whether the browser is serving the current build or a cached
  * one. Bumped together with CACHE in sw.js.
  */
-export const APP_VERSION = 'v66';
+export const APP_VERSION = 'v67';
 
 export const SEED_COMPETITION = {
   name: 'Prvenstvo Srbije 2026',
@@ -449,8 +449,31 @@ export const properName = (value) => String(value ?? '')
   .replace(/(^|[\s'\u2019-])(\p{L})/gu,
     (match, before, letter) => before + letter.toLocaleUpperCase('sr'));
 
-/** Serbian-aware surname sort key (entries print "po klubu, pa po prezimenu"). */
-export const surnameOf = (fullName) => fullName.slice(fullName.lastIndexOf(' ') + 1);
+/**
+ * A whole name cut into first name and surname at the last space. For
+ * records and forms from before the two were entered apart.
+ */
+export function splitName(value) {
+  const name = String(value ?? '').trim().replace(/\s+/g, ' ');
+  const at = name.lastIndexOf(' ');
+  return at < 0 ? { first: '', last: name } : { first: name.slice(0, at), last: name.slice(at + 1) };
+}
+
+/**
+ * First name and surname of a person, competitor or entry. Entered and
+ * stored apart; an older record has only the whole name, which is split.
+ */
+export const nameParts = (record) => (record?.firstName || record?.lastName
+  ? { first: record.firstName || '', last: record.lastName || '' }
+  : splitName(record?.name));
+
+/**
+ * The words of a name in a fixed order, in lower case: "Petar Petrović"
+ * and "Petrović Petar" give the same. Identity compares names this way,
+ * so whichever way round a form had them, it is one person.
+ */
+export const nameWords = (value) => String(value ?? '').trim().toLowerCase()
+  .split(/\s+/).filter(Boolean).sort().join(' ');
 
 /**
  * The category an entry is drawn in — split by the discipline's drawBy:
@@ -525,13 +548,13 @@ export function nextFssNumber(ids, year, top = 0) {
 
 /**
  * Two spellings of one name compare equal: lower case, no diacritics,
- * letters only — "Petrovic" and "Petrović" match, "Marko Petrović" and
- * "Petar Petrović" do not.
+ * letters only, words in any order — "Petrovic Petar" and "Petar
+ * Petrović" match, "Marko Petrović" and "Petar Petrović" do not.
  */
 export const nameKey = (value) => String(value ?? '').toLocaleLowerCase('sr')
   .replace(/đ/g, 'dj')
   .normalize('NFD').replace(/\p{M}/gu, '')
-  .replace(/[^\p{L}]/gu, '');
+  .split(/[^\p{L}]+/u).filter(Boolean).sort().join(' ');
 
 /**
  * What an ID written on a form says about its row. The ID names a person
@@ -670,9 +693,12 @@ export function buildRegistry(seed = 7) {
     const age = ageByCode(group);
     const club = rng.pick(CLUBS);
     const first = sex === 'M' ? rng.pick(FIRST_M) : rng.pick(FIRST_F);
+    const last = rng.pick(LAST);
     const c = {
       id: competitors.length + 1,
-      name: `${first} ${rng.pick(LAST)}`,
+      name: `${first} ${last}`,
+      firstName: first,
+      lastName: last,
       sex,
       year: rng.int(...sampleYears(age)),
       group,
@@ -699,6 +725,8 @@ export function buildRegistry(seed = 7) {
       weight,
       // Denormalised for the table renderers — one flat row per prijava.
       name: competitor.name,
+      firstName: competitor.firstName,
+      lastName: competitor.lastName,
       sex: competitor.sex,
       year: competitor.year,
       group: competitor.group,
@@ -841,7 +869,10 @@ export function buildRegistry(seed = 7) {
               club: members[0].club,
               city: members[0].city,
               coach: members[0].coach,
-              members: members.map((c) => ({ name: c.name, year: c.year, belt: c.belt, sex: c.sex })),
+              members: members.map((c) => ({
+                name: c.name, firstName: c.firstName, lastName: c.lastName,
+                year: c.year, belt: c.belt, sex: c.sex,
+              })),
             });
           }
         });

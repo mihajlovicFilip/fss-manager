@@ -141,6 +141,19 @@ def fss_format(cell):
             f'VALUE({number})=INT(VALUE({number}))),FALSE)')
 
 
+def first_failing(checks, ok):
+    """
+    The "Provera" sentence: the message of the first check that holds,
+    else `ok`. Built as nested IFs from a list, so adding a check never
+    means counting closing brackets. A message is a formula expression —
+    a quoted text, or text joined with &.
+    """
+    formula = f'"{ok}"'
+    for condition, message in reversed(checks):
+        formula = f'IF({condition},{message},{formula})'
+    return formula
+
+
 def group_formula(birth_year):
     return f'IF({birth_year}="","",LOOKUP({birth_year},INDEX(grupe,0,1),INDEX(grupe,0,2)))'
 
@@ -263,20 +276,19 @@ def sheet_individual(wb, p, s):
     ws = wb.add_worksheet('Prijava')
     n_disc = discipline_columns(p)
 
-    K_GOD, K_IME, K_POL, K_POJAS, K_GRUPA, K_UZRAST = range(6)
-    K_DISC = 6
+    # Who it is comes first — FSS ID, first name, surname, each in its own
+    # column, so a row is checked at a glance — then everything else.
+    K_FSS, K_IME, K_PREZIME, K_GOD, K_POL, K_POJAS, K_GRUPA, K_UZRAST = range(8)
+    K_DISC = 8
     K_KILAZA = K_DISC + n_disc
-    # The FSS ID goes after everything else that is typed, so the columns
-    # before it — and every formula that names them — stay where they were.
-    K_FSS = K_KILAZA + 1
-    K_PROVERA = K_FSS + 1
+    K_PROVERA = K_KILAZA + 1
     K_POMOC_D = K_PROVERA + 1
     K_POMOC_K = K_PROVERA + 2
 
-    kolone = [('Godište', 10), ('Ime i prezime', 26), ('Pol', 10), ('Pojas', 11),
-              ('Grupa', 8), ('Uzrast', 16)]
+    kolone = [('FSS ID', 13), ('Ime', 16), ('Prezime', 18), ('Godište', 10), ('Pol', 10),
+              ('Pojas', 11), ('Grupa', 8), ('Uzrast', 16)]
     kolone += [(f'Disciplina {i + 1}', 20) for i in range(n_disc)]
-    kolone += [('Telesna težina', 12), ('FSS ID', 13), ('Provera', 34)]
+    kolone += [('Telesna težina', 12), ('Provera', 34)]
     for i, (naslov, sirina) in enumerate(kolone):
         ws.set_column(i, i, sirina)
     ws.set_column(K_POMOC_D, K_POMOC_K, 14, None, {'hidden': True})
@@ -289,13 +301,14 @@ def sheet_individual(wb, p, s):
                    f'izdanje {datetime.date.today().strftime("%d.%m.%Y.")}', s['sitno'])
     ws.set_row(2, 40)
     ws.merge_range(2, 0, 2, K_PROVERA, (
-        'Unos počinje godištem: uzrasna grupa i naziv uzrasta popunjavaju se automatski, '
-        'a padajući meni nudi discipline koje su moguće u odnosu na uzrast. Telesna težina '
-        'unosi se isključivo uz Fudokan sport kumite, budući da je tradicionalni kumite '
-        'apsolutna kategorija. U kolonu „FSS ID" upisuje se ID takmičara sa spiska saveza — '
-        f'za {p["sezona"]}. godinu, a dok ga takmičar nema, prošlogodišnji; takmičar koji '
-        'nastupa prvi put ostaje bez ID-a, nov ID dodeljuje savez. Kolona „Provera" služi za '
-        'proveru kompletnosti prijave. Ekipne prijave se unose na listu „Ekipno".'),
+        'U prvu kolonu upisuje se FSS ID takmičara sa spiska saveza — za '
+        f'{p["sezona"]}. godinu, a dok ga takmičar nema, prošlogodišnji; takmičar koji '
+        'nastupa prvi put ostaje bez ID-a, nov ID dodeljuje savez. Ime i prezime upisuju se '
+        'svako u svoju kolonu. Uzrasna grupa i naziv uzrasta popunjavaju se automatski iz '
+        'godišta, a padajući meni nudi discipline koje su moguće u odnosu na uzrast. Telesna '
+        'težina unosi se isključivo uz Fudokan sport kumite, budući da je tradicionalni '
+        'kumite apsolutna kategorija. Kolona „Provera" služi za proveru kompletnosti '
+        'prijave. Ekipne prijave se unose na listu „Ekipno".'),
         s['uputstvo'])
 
     for red, ime, napomena in ((3, 'Klub', 'pun naziv kluba, onako kako se navodi u rezultatima'),
@@ -313,49 +326,56 @@ def sheet_individual(wb, p, s):
         ws.write(ZAGLAVLJE, i, naslov, s['zaglavlje'])
 
     prvi, posl = ZAGLAVLJE + 1, ZAGLAVLJE + ROWS
+    fss, ime, prezime, god, pol, pojas, grupa = (
+        column_letter(k) for k in (K_FSS, K_IME, K_PREZIME, K_GOD, K_POL, K_POJAS, K_GRUPA))
     disc_od, disc_do = column_letter(K_DISC), column_letter(K_DISC + n_disc - 1)
     kg, pomoc_d, pomoc_k = column_letter(K_KILAZA), column_letter(K_POMOC_D), column_letter(K_POMOC_K)
-    fss = column_letter(K_FSS)
     primer = f'FSS-12/{p["sezona"] % 100:02d}'
 
     for r in range(prvi, posl + 1):
         e = r + 1                      # the row number as Excel sees it
-        for c in [K_GOD, K_IME, K_POL, K_POJAS] + list(range(K_DISC, K_FSS + 1)):
+        for c in [K_FSS, K_IME, K_PREZIME, K_GOD, K_POL, K_POJAS] + list(range(K_DISC, K_KILAZA + 1)):
             ws.write_blank(r, c, None, s['unos'])
 
-        ws.write_formula(r, K_GRUPA, f'={group_formula(f"$A{e}")}', s['izvedeno'], '')
-        ws.write_formula(r, K_UZRAST, f'={age_name_formula(f"$E{e}")}', s['izvedeno'], '')
+        ws.write_formula(r, K_GRUPA, f'={group_formula(f"${god}{e}")}', s['izvedeno'], '')
+        ws.write_formula(r, K_UZRAST, f'={age_name_formula(f"${grupa}{e}")}', s['izvedeno'], '')
 
         disc = f'{disc_od}{e}:{disc_do}{e}'
-        # A row with only an ID is not empty: the ID does not replace the
-        # name and the rest, the app still needs them all.
-        ws.write_formula(r, K_PROVERA, (
-            f'=IF(COUNTA($A{e}:$D{e},{disc},{fss}{e})=0,"",'
-            f'IF($A{e}="","Nedostaje godište",'
-            f'IF($E{e}="","Godište nije obuhvaćeno uzrasnom tabelom",'
-            f'IF($B{e}="","Nedostaje ime i prezime",'
-            f'IF(NOT({letters_only(f"$B{e}")}),"Ime sadrži znakove koji nisu slova",'
-            f'IF($C{e}="","Nedostaje pol",'
-            f'IF($D{e}="","Nedostaje pojas",'
-            f'IF(COUNTA({disc})=0,"Nije izabrana nijedna disciplina",'
+        # In the order of the columns, so the sentence names the first
+        # thing a coach meets that is wrong.
+        provera = first_failing([
+            (f'AND(${fss}{e}<>"",NOT({fss_format(f"${fss}{e}")}))',
+             f'"FSS ID se upisuje u obliku {primer}"'),
+            (f'${ime}{e}=""', '"Nedostaje ime"'),
+            (f'NOT({letters_only(f"${ime}{e}")})', '"Ime sadrži znakove koji nisu slova"'),
+            (f'${prezime}{e}=""', '"Nedostaje prezime"'),
+            (f'NOT({letters_only(f"${prezime}{e}")})', '"Prezime sadrži znakove koji nisu slova"'),
+            (f'${god}{e}=""', '"Nedostaje godište"'),
+            (f'${grupa}{e}=""', '"Godište nije obuhvaćeno uzrasnom tabelom"'),
+            (f'${pol}{e}=""', '"Nedostaje pol"'),
+            (f'${pojas}{e}=""', '"Nedostaje pojas"'),
+            (f'COUNTA({disc})=0', '"Nije izabrana nijedna disciplina"'),
             # A discipline outside the age: the menu does not offer it,
             # but it can arrive typed or before the year was picked.
-            f'IF(SUMPRODUCT(--({disc}<>""),--(COUNTIF(INDIRECT("disc_"&$E{e}),{disc})=0))>0,'
-            f'"Izabrana disciplina nije moguća za uzrast "&$E{e},'
-            f'IF(AND(COUNTIF({disc},"Fudokan sport kumite")>0,{kg}{e}=""),'
-            f'"Nedostaje telesna težina za Fudokan sport kumite",'
-            f'IF(AND(COUNTIF({disc},"Fudokan sport kumite")=0,{kg}{e}<>""),'
-            f'"Telesna težina se unosi isključivo uz Fudokan sport kumite",'
-            f'IF(AND({fss}{e}<>"",NOT({fss_format(f"{fss}{e}")})),'
-            f'"FSS ID se upisuje u obliku {primer}",'
-            f'"prijava je kompletna"))))))))))))'), s['provera'], '')
+            (f'SUMPRODUCT(--({disc}<>""),--(COUNTIF(INDIRECT("disc_"&${grupa}{e}),{disc})=0))>0',
+             f'"Izabrana disciplina nije moguća za uzrast "&${grupa}{e}'),
+            (f'AND(COUNTIF({disc},"Fudokan sport kumite")>0,{kg}{e}="")',
+             '"Nedostaje telesna težina za Fudokan sport kumite"'),
+            (f'AND(COUNTIF({disc},"Fudokan sport kumite")=0,{kg}{e}<>"")',
+             '"Telesna težina se unosi isključivo uz Fudokan sport kumite"'),
+        ], 'prijava je kompletna')
+        # Columns A–F are all typed, so one range counts them. A row with
+        # only an ID is not empty: the ID does not replace the rest.
+        ws.write_formula(r, K_PROVERA,
+                         f'=IF(COUNTA(${fss}{e}:${pojas}{e},{disc},{kg}{e})=0,"",{provera})',
+                         s['provera'], '')
 
         # The named range the menu fills from. The whole calculation
         # sits here in a cell, so the validation rule stays simplest.
-        ws.write_formula(r, K_POMOC_D, f'=IF($E{e}="","sve_discipline","disc_"&$E{e})', None, '')
+        ws.write_formula(r, K_POMOC_D, f'=IF(${grupa}{e}="","sve_discipline","disc_"&${grupa}{e})', None, '')
         ws.write_formula(r, K_POMOC_K, (
-            f'=IF(OR($E{e}="",$C{e}=""),"sve_kilaze",'
-            f'"kg_"&$E{e}&"_"&IF($C{e}="ženski","Z","M"))'), None, '')
+            f'=IF(OR(${grupa}{e}="",${pol}{e}=""),"sve_kilaze",'
+            f'"kg_"&${grupa}{e}&"_"&IF(${pol}{e}="ženski","Z","M"))'), None, '')
 
     pe = prvi + 1                      # first data row in Excel terms
     meni = {'validate': 'list', 'ignore_blank': True, 'dropdown': True, 'error_type': 'stop'}
@@ -377,13 +397,15 @@ def sheet_individual(wb, p, s):
         error_message='Godište i pol unose se pre telesne težine. Telesna težina unosi se '
                       'isključivo uz Fudokan sport kumite, budući da je tradicionalni '
                       'kumite apsolutna kategorija.'))
-    ws.data_validation(prvi, K_IME, posl, K_IME, {
-        'validate': 'custom', 'value': f'={no_digits(f"B{pe}")}',
-        'ignore_blank': True, 'error_type': 'stop', 'error_title': 'Ime i prezime',
-        'error_message': 'Polje prima isključivo slova, razmak, crticu i apostrof; '
-                         'cifre nisu dozvoljene.'})
+    for kolona, slovo, naslov in ((K_IME, ime, 'Ime'), (K_PREZIME, prezime, 'Prezime')):
+        ws.data_validation(prvi, kolona, posl, kolona, {
+            'validate': 'custom', 'value': f'={no_digits(f"{slovo}{pe}")}',
+            'ignore_blank': True, 'error_type': 'stop', 'error_title': naslov,
+            'error_message': 'Polje prima isključivo slova, razmak, crticu i apostrof; '
+                             'cifre nisu dozvoljene.'})
 
-    ws.freeze_panes(prvi, 0)
+    # ID and name stay in view while the coach scrolls to the disciplines.
+    ws.freeze_panes(prvi, K_PREZIME + 1)
     lock_sheet(ws, ZAGLAVLJE)
     return ws
 
@@ -396,13 +418,14 @@ def sheet_teams(wb, p, s):
 
     K_DISC, K_VRSTA, K_GRUPA, K_UZRAST = range(4)
     K_CLAN = 4
-    K_PROVERA = K_CLAN + 3 * n_clan
+    PO_CLANU = 4                       # first name, surname, year, sex
+    K_PROVERA = K_CLAN + PO_CLANU * n_clan
     K_POMOC = K_PROVERA + 1
 
     kolone = [('Disciplina', 24), ('Vrsta', 16), ('Grupa', 8), ('Uzrast', 15)]
     for i in range(n_clan):
-        kolone += [(f'{i + 1}. godište', 11), (f'{i + 1}. ime i prezime', 24),
-                   (f'{i + 1}. pol', 10)]
+        kolone += [(f'{i + 1}. ime', 14), (f'{i + 1}. prezime', 16),
+                   (f'{i + 1}. godište', 11), (f'{i + 1}. pol', 10)]
     kolone.append(('Provera', 36))
     for i, (naslov, sirina) in enumerate(kolone):
         ws.set_column(i, i, sirina)
@@ -410,12 +433,13 @@ def sheet_teams(wb, p, s):
 
     ws.write(0, 0, 'EKIPNE PRIJAVE', s['naslov'])
     ws.write(1, 0, 'Popunjava se samo ako klub prijavljuje ekipe', s['sitno'])
-    ws.set_row(2, 28)
+    ws.set_row(2, 40)
     ws.merge_range(2, 0, 2, K_PROVERA, (
         'Jedan red predstavlja jednu ekipu; klub može prijaviti više ekipa u istoj '
-        'disciplini, svaku u zasebnom redu. Unos počinje godištem prvog člana, iz kojeg se '
-        'izvodi uzrasna grupa, pa padajući meni nudi ekipne discipline koje su moguće u '
-        'odnosu na taj uzrast. Svi članovi ekipe moraju pripadati istoj uzrasnoj grupi.'),
+        'disciplini, svaku u zasebnom redu. Za svakog člana upisuju se ime i prezime, svako '
+        'u svoju kolonu, zatim godište i pol. Uzrasna grupa izvodi se iz godišta prvog člana, '
+        'pa padajući meni nudi ekipne discipline koje su moguće u odnosu na taj uzrast. Svi '
+        'članovi ekipe moraju pripadati istoj uzrasnoj grupi.'),
         s['uputstvo'])
 
     # Club and coach are not asked twice — pulled from the first sheet.
@@ -430,9 +454,9 @@ def sheet_teams(wb, p, s):
         ws.write(ZAGLAVLJE, i, naslov, s['zaglavlje'])
 
     prvi, posl = ZAGLAVLJE + 1, ZAGLAVLJE + ROWS
-    godista = [column_letter(K_CLAN + 3 * i) for i in range(n_clan)]
-    imena = [column_letter(K_CLAN + 3 * i + 1) for i in range(n_clan)]
-    polovi = [column_letter(K_CLAN + 3 * i + 2) for i in range(n_clan)]
+    imena, prezimena, godista, polovi = (
+        [column_letter(K_CLAN + PO_CLANU * i + k) for i in range(n_clan)] for k in range(PO_CLANU))
+    disciplina, vrsta, grupa = (column_letter(k) for k in (K_DISC, K_VRSTA, K_GRUPA))
     pomoc = column_letter(K_POMOC)
 
     for r in range(prvi, posl + 1):
@@ -443,35 +467,38 @@ def sheet_teams(wb, p, s):
         # The team's group is the first member's; the check reports
         # members from different groups.
         ws.write_formula(r, K_GRUPA, f'={group_formula(f"${godista[0]}{e}")}', s['izvedeno'], '')
-        ws.write_formula(r, K_UZRAST, f'={age_name_formula(f"$C{e}")}', s['izvedeno'], '')
+        ws.write_formula(r, K_UZRAST, f'={age_name_formula(f"${grupa}{e}")}', s['izvedeno'], '')
 
-        sva_godista = ','.join(f'${g}{e}' for g in godista)
-        sva_imena = ','.join(f'${i}{e}' for i in imena)
-        svi_polovi = ','.join(f'${x}{e}' for x in polovi)
+        sva_imena, sva_prezimena, sva_godista, svi_polovi = (
+            ','.join(f'${k}{e}' for k in kolone) for kolone in (imena, prezimena, godista, polovi))
         razidjeni = '+'.join(
-            f'IF(${g}{e}="",0,IF(LOOKUP(${g}{e},INDEX(grupe,0,1),INDEX(grupe,0,2))=$C{e},0,1))'
+            f'IF(${g}{e}="",0,IF(LOOKUP(${g}{e},INDEX(grupe,0,1),INDEX(grupe,0,2))=${grupa}{e},0,1))'
             for g in godista)
-        losa_imena = '+'.join(f'IF({letters_only(f"${i}{e}")},0,1)' for i in imena)
+        losa_imena = '+'.join(f'IF({letters_only(f"${k}{e}")},0,1)' for k in imena + prezimena)
         broj = f'COUNTA({sva_imena})'
+        najmanje = f'VLOOKUP(${disciplina}{e},ekipe,2,FALSE)'
+        najvise = f'VLOOKUP(${disciplina}{e},ekipe,3,FALSE)'
 
+        provera = first_failing([
+            (f'${disciplina}{e}=""', '"Nedostaje disciplina"'),
+            (f'${godista[0]}{e}=""', '"Nedostaje godište prvog člana"'),
+            (f'${grupa}{e}=""', '"Godište nije obuhvaćeno uzrasnom tabelom"'),
+            (f'COUNTIF(INDIRECT("tdisc_"&${grupa}{e}),${disciplina}{e})=0',
+             f'"Disciplina nije moguća za uzrast "&${grupa}{e}'),
+            (f'{razidjeni}>0', '"Članovi ekipe nisu iz iste uzrasne grupe"'),
+            (f'OR({broj}<>COUNTA({sva_prezimena}),{broj}<>COUNTA({sva_godista}))',
+             '"Za svakog člana potrebni su ime, prezime i godište"'),
+            (f'{losa_imena}>0', '"Ime ili prezime sadrži znakove koji nisu slova"'),
+            (f'COUNTA({svi_polovi})<>{broj}', '"Nedostaje pol za nekog od članova"'),
+            (f'{broj}<{najmanje}', f'"Ekipa mora imati najmanje "&{najmanje}&" člana"'),
+            (f'{broj}>{najvise}', f'"Ekipa može imati najviše "&{najvise}&" člana"'),
+            (f'${vrsta}{e}=""', '"Nedostaje vrsta ekipe"'),
+        ], 'prijava je kompletna')
         ws.write_formula(r, K_PROVERA, (
-            f'=IF(COUNTA($A{e}:$B{e},{sva_godista},{sva_imena})=0,"",'
-            f'IF($A{e}="","Nedostaje disciplina",'
-            f'IF(${godista[0]}{e}="","Nedostaje godište prvog člana",'
-            f'IF($C{e}="","Godište nije obuhvaćeno uzrasnom tabelom",'
-            f'IF(COUNTIF(INDIRECT("tdisc_"&$C{e}),$A{e})=0,'
-            f'"Disciplina nije moguća za uzrast "&$C{e},'
-            f'IF({razidjeni}>0,"Članovi ekipe nisu iz iste uzrasne grupe",'
-            f'IF({broj}<>COUNTA({sva_godista}),"Za svakog člana potrebni su i godište i ime",'
-            f'IF({losa_imena}>0,"Ime sadrži znakove koji nisu slova",'
-            f'IF(COUNTA({svi_polovi})<>{broj},"Nedostaje pol za nekog od članova",'
-            f'IF({broj}<VLOOKUP($A{e},ekipe,2,FALSE),'
-            f'"Ekipa mora imati najmanje "&VLOOKUP($A{e},ekipe,2,FALSE)&" člana",'
-            f'IF({broj}>VLOOKUP($A{e},ekipe,3,FALSE),'
-            f'"Ekipa može imati najviše "&VLOOKUP($A{e},ekipe,3,FALSE)&" člana",'
-            f'IF($B{e}="","Nedostaje vrsta ekipe","prijava je kompletna")))))))))))'), s['provera'], '')
+            f'=IF(COUNTA(${disciplina}{e}:${vrsta}{e},{sva_imena},{sva_prezimena},'
+            f'{sva_godista})=0,"",{provera})'), s['provera'], '')
 
-        ws.write_formula(r, K_POMOC, f'=IF($C{e}="","sve_ekipne","tdisc_"&$C{e})', None, '')
+        ws.write_formula(r, K_POMOC, f'=IF(${grupa}{e}="","sve_ekipne","tdisc_"&${grupa}{e})', None, '')
 
     pe = prvi + 1
     meni = {'validate': 'list', 'ignore_blank': True, 'dropdown': True, 'error_type': 'stop'}
@@ -484,17 +511,19 @@ def sheet_teams(wb, p, s):
         error_message='Vrsta ekipe: muškarci ili žene. Enbu se takmiči u muškom i '
                       'mešovitom paru.'))
     for i in range(n_clan):
-        ws.data_validation(prvi, K_CLAN + 3 * i, posl, K_CLAN + 3 * i, dict(
+        prva = K_CLAN + PO_CLANU * i
+        for k, slovo, naslov in ((prva, imena[i], 'Ime'), (prva + 1, prezimena[i], 'Prezime')):
+            ws.data_validation(prvi, k, posl, k, {
+                'validate': 'custom', 'value': f'={no_digits(f"{slovo}{pe}")}',
+                'ignore_blank': True, 'error_type': 'stop', 'error_title': naslov,
+                'error_message': 'Polje prima isključivo slova, razmak, crticu i apostrof; '
+                                 'cifre nisu dozvoljene.'})
+        ws.data_validation(prvi, prva + 2, posl, prva + 2, dict(
             meni, source='=godista', error_title='Godište',
             error_message='Godište se bira iz padajućeg menija.'))
-        ws.data_validation(prvi, K_CLAN + 3 * i + 2, posl, K_CLAN + 3 * i + 2, dict(
+        ws.data_validation(prvi, prva + 3, posl, prva + 3, dict(
             meni, source='=polovi', error_title='Pol',
             error_message='Pol se bira iz padajućeg menija.'))
-        ws.data_validation(prvi, K_CLAN + 3 * i + 1, posl, K_CLAN + 3 * i + 1, {
-            'validate': 'custom', 'value': f'={no_digits(f"{imena[i]}{pe}")}',
-            'ignore_blank': True, 'error_type': 'stop', 'error_title': 'Ime i prezime',
-            'error_message': 'Polje prima isključivo slova, razmak, crticu i apostrof; '
-                         'cifre nisu dozvoljene.'})
 
     ws.freeze_panes(prvi, 0)
     lock_sheet(ws, ZAGLAVLJE)

@@ -20,12 +20,16 @@
  * The "FSS ID" column is optional — forms from before it import as they
  * always did. An ID that belongs to somebody else stops its row here
  * already, by the same rule the import applies (fssVerdict in data.js).
+ *
+ * First name and surname come in two columns (Ime, Prezime). A form from
+ * before the split has one, "Ime i prezime", and it still imports — the
+ * whole name is cut at the last space.
  */
 
 import {
   BELTS, WEIGHTS, DISCIPLINES,
   ageByCode, disciplineByName, groupOfYear, levelOfBelt, teamVariants, SEASON, properName,
-  fssVerdict,
+  fssVerdict, nameKey, splitName,
 } from './data.js';
 import { readWorkbook } from './xlsx.js';
 
@@ -50,6 +54,33 @@ const nameProblem = (value) => {
   if (!NAME_OK.test(name)) return `ime „${name}" sadrži znakove koji nisu slova`;
   if (name.split(' ').length < 2) return `„${name}" ne sadrži i ime i prezime`;
   return null;
+};
+
+/**
+ * A name from its columns — `first` and `last` (Ime, Prezime), or `full`
+ * (Ime i prezime) on an older form. Returns both parts as typed, the name
+ * as the screen shows it and the first problem, if any.
+ */
+function readName(row, cols) {
+  if (cols.full !== undefined) {
+    const whole = tidy(row[cols.full]);
+    return { ...splitName(whole), raw: whole, problem: nameProblem(whole) };
+  }
+  const first = tidy(row[cols.first]);
+  const last = tidy(row[cols.last]);
+  let problem = null;
+  if (!first) problem = 'nije uneto ime';
+  else if (!last) problem = 'nije uneto prezime';
+  else if (!NAME_OK.test(first)) problem = `ime „${first}" sadrži znakove koji nisu slova`;
+  else if (!NAME_OK.test(last)) problem = `prezime „${last}" sadrži znakove koji nisu slova`;
+  return { first, last, raw: `${first} ${last}`.trim(), problem };
+}
+
+/** First name, surname and the whole name, each written as names are. */
+const named = ({ first, last }) => {
+  const firstName = properName(first);
+  const lastName = properName(last);
+  return { name: `${firstName} ${lastName}`.trim(), firstName, lastName };
 };
 
 /** "muški", "M", "m" → 'M'. Empty stays empty. */
@@ -157,13 +188,16 @@ function fssNote(said, season, club) {
  * @param {string} [club] the club in the form's header — for naming a transfer
  */
 function readSolo(rows, season, owners = null, club = '') {
-  const head = headerRow(rows, ['Godište', 'Ime i prezime']);
+  const head = headerRow(rows, ['Godište', 'Ime', 'Prezime'])
+    || headerRow(rows, ['Godište', 'Ime i prezime']);
   if (!head) {
-    return { rows: [], error: 'Na listu prijava nema reda sa naslovima kolona (Godište, Ime i prezime).' };
+    return { rows: [], error: 'Na listu prijava nema reda sa naslovima kolona (Ime, Prezime, Godište).' };
   }
 
   const col = (naslov) => head.map.get(key(naslov));
-  const cIme = col('Ime i prezime');
+  const cName = col('Ime') !== undefined
+    ? { first: col('Ime'), last: col('Prezime') }
+    : { full: col('Ime i prezime') };
   const cGod = col('Godište');
   const cPol = col('Pol');
   const cPojas = col('Pojas');
@@ -175,7 +209,7 @@ function readSolo(rows, season, owners = null, club = '') {
   head.map.forEach((at, k) => { if (k.startsWith('disciplina')) cDisc.push(at); });
   cDisc.sort((a, b) => a - b);
 
-  const unos = [cGod, cIme, cPol, cPojas, cKg, cFss, ...cDisc];
+  const unos = [cFss, cName.first, cName.last, cName.full, cGod, cPol, cPojas, cKg, ...cDisc];
   const out = [];
   const seen = new Map();
   let prazno = 0;
@@ -190,18 +224,19 @@ function readSolo(rows, season, owners = null, club = '') {
     prazno = 0;
     if (isNote(row, unos)) continue;
 
-    const line = { excelRow: i + 1, raw: tidy(row[cIme]) || '(bez imena)' };
+    const who = readName(row, cName);
+    const line = { excelRow: i + 1, raw: who.raw || '(bez imena)', first: who.first, last: who.last };
     const year = Number(tidy(row[cGod]));
     const group = year ? groupOfYear(year, season) : '';
     const sex = readSex(row[cPol]);
     const belt = readBelt(row[cPojas]);
     const names = cDisc.map((c) => tidy(row[c])).filter(Boolean);
 
+    // Checked in the order of the form's columns: the name, then the rest.
     const problem = (() => {
+      if (who.problem) return who.problem;
       if (!year) return 'nije uneto godište';
       if (!group) return `godište ${year} nije obuhvaćeno uzrasnom tabelom`;
-      const bad = nameProblem(row[cIme]);
-      if (bad) return bad;
       if (!sex) return 'nije unet pol';
       if (!belt) return tidy(row[cPojas]) ? `pojas „${tidy(row[cPojas])}" ne postoji u pravilniku` : 'nije unet pojas';
       if (!names.length) return 'nije izabrana nijedna disciplina';
@@ -230,7 +265,7 @@ function readSolo(rows, season, owners = null, club = '') {
       }
 
       line.competitor = {
-        name: properName(row[cIme]), sex, year, group, belt, level: levelOfBelt(belt),
+        ...named(who), sex, year, group, belt, level: levelOfBelt(belt),
         disciplines: disciplines.map((d) => ({
           name: d.name, weight: d.drawBy === 'weight' ? weight : null,
         })),
@@ -256,7 +291,8 @@ function readSolo(rows, season, owners = null, club = '') {
         + `${said.person.club || 'bez kluba'}) — proveri ID ili ime`;
       delete line.competitor;
     } else {
-      const dup = `${key(line.competitor.name)}|${year}`;
+      // The same person twice, in whatever order the name was written.
+      const dup = `${nameKey(line.competitor.name)}|${year}`;
       if (seen.has(dup)) {
         line.problem = `takmičar je već unet u redu ${seen.get(dup)}`;
         delete line.competitor;
@@ -281,18 +317,23 @@ function readTeams(rows, season) {
   const cDisc = col('Disciplina');
   const cVrsta = col('Vrsta');
 
-  // Members come in triples: "1. godište · 1. ime i prezime · 1. pol".
+  // Members come in fours: "1. ime · 1. prezime · 1. godište · 1. pol" —
+  // or, on an older form, in threes with "1. ime i prezime".
   const members = [];
   for (let n = 1; n <= 8; n++) {
     const god = col(`${n}. godište`);
-    const ime = col(`${n}. ime i prezime`);
     const pol = col(`${n}. pol`);
-    if (god === undefined || ime === undefined) break;
-    members.push({ god, ime, pol });
+    const names = col(`${n}. ime`) !== undefined
+      ? { first: col(`${n}. ime`), last: col(`${n}. prezime`) }
+      : { full: col(`${n}. ime i prezime`) };
+    if (god === undefined || (names.full === undefined && names.last === undefined)
+      || (names.first === undefined && names.full === undefined)) break;
+    members.push({ god, pol, names });
   }
   if (!members.length) return { rows: [] };
 
-  const unos = [cDisc, cVrsta, ...members.flatMap((m) => [m.god, m.ime, m.pol])];
+  const unos = [cDisc, cVrsta, ...members.flatMap((m) => [
+    m.god, m.pol, m.names.first, m.names.last, m.names.full])];
   const out = [];
   let prazno = 0;
 
@@ -318,17 +359,16 @@ function readTeams(rows, season) {
       const people = [];
       for (const m of members) {
         const year = Number(tidy(row[m.god]));
-        const who = tidy(row[m.ime]);
-        if (!year && !who) continue;
-        if (!year) return `članu „${who}" nije uneto godište`;
-        if (!who) return `članu sa godištem ${year} nije uneto ime`;
-        const bad = nameProblem(who);
-        if (bad) return bad;
+        const who = readName(row, m.names);
+        if (!year && !who.raw) continue;
+        if (!year) return `članu „${who.raw}" nije uneto godište`;
+        if (!who.raw) return `članu sa godištem ${year} nije uneto ime`;
+        if (who.problem) return `${who.problem} (član „${who.raw}")`;
         const sex = readSex(row[m.pol]);
-        if (!sex) return `članu „${who}" nije unet pol`;
+        if (!sex) return `članu „${who.raw}" nije unet pol`;
         // Team member names get the same written form as individual
         // entries, so the same person reads the same everywhere.
-        people.push({ name: properName(who), sex, year, group: groupOfYear(year, season) });
+        people.push({ ...named(who), sex, year, group: groupOfYear(year, season) });
       }
 
       if (!people.length) return 'ekipi nije unet nijedan član';
@@ -337,7 +377,7 @@ function readTeams(rows, season) {
       if (people.some((m) => m.group !== group)) {
         return 'članovi ekipe nisu iz iste uzrasne grupe';
       }
-      if (new Set(people.map((m) => key(m.name))).size !== people.length) {
+      if (new Set(people.map((m) => nameKey(m.name))).size !== people.length) {
         return 'isti takmičar je unet dvaput u istoj ekipi';
       }
       if (d.groups.indexOf(group) < 0) {
@@ -369,7 +409,9 @@ function readTeams(rows, season) {
       line.team = {
         discipline: d.name, group,
         sex: variant.sex || '', variant: variant.key, variantLabel: variant.label,
-        members: people.map((m) => ({ name: m.name, sex: m.sex, year: m.year })),
+        members: people.map((m) => ({
+          name: m.name, firstName: m.firstName, lastName: m.lastName, sex: m.sex, year: m.year,
+        })),
       };
       return null;
     })();

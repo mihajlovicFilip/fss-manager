@@ -82,8 +82,9 @@ register immediately, and the other way round.
 The blank form is downloaded with the **Prazan formular za klubove** button on
 the *Uvoz prijava* screen, or taken from `form/FSS-Entry-Form.xlsx`. Clubs fill
 it in Excel on their own machines — they never open the application and do not
-need to have it. Next to each competitor the coach writes their
-[FSS ID](#the-fss-id) if they have one.
+need to have it. Each row starts with who the competitor is: their
+[FSS ID](#the-fss-id) if they have one, then first name and surname, each in its
+own column.
 
 ### 3. Import the entries
 
@@ -107,6 +108,13 @@ Import rules:
   of each part capitalised, hyphenated surnames included. This is about how the
   name reads on a list, a diploma and a bill; recognising the person never
   depended on capitalisation, since identity compares in lower case.
+- **First name and surname are entered apart**, in two columns, and stored
+  apart. A form from before the split — one *Ime i prezime* column — still
+  imports: the whole name is cut at the last space.
+- **The order of the name does not matter.** *Petar Petrović* and *Petrović
+  Petar* are one person, whether the club swapped the two columns or wrote the
+  surname first in an old form. A person the database already knows is listed
+  the way round the database has them.
 - **A person is identified by name, year of birth and club.** The federation
   issues licence numbers and the database prefers one when present, but until
   they are in hand this is the most precise identification available, and it is
@@ -131,9 +139,10 @@ Import rules:
 
 Clubs make mistakes: a wrong sex, a mistyped year of birth, a discipline entered
 for an age that does not run it. Screen **Takmičari** carries an *Izmeni* button
-on every row while entries are open, and it corrects the whole entry — name,
-club, sex, year, belt, body weight and the disciplines themselves, or removes
-the competitor from the competition altogether.
+on every row while entries are open, and it corrects the whole entry — first
+name and surname (two fields, as on the form), club, sex, year, belt, body weight
+and the disciplines themselves, or removes the competitor from the competition
+altogether.
 
 **Disciplines are ticked, not typed.** The dialog lists every discipline the age
 group runs; ticking one adds that entry, unticking removes it — which is what
@@ -376,7 +385,7 @@ worse than no list at all.
 | **Kontrolna tabla**     | dashboard: current competition, figures derived from the entry register, and checks that find what needs correcting |
 | **Takmičenja**          | competition register: create, select the current one, delete                 |
 | **Uvoz prijava**        | read completed club forms and write them into the chosen competition         |
-| **Takmičari**           | competitor list with FSS IDs, medals and points, searchable by name, club or FSS ID; a name opens that person's record across all seasons, *Izmeni* corrects an entry and *+ Nova prijava* writes a new one, while entries are open |
+| **Takmičari**           | competitor list in the form's order — FSS ID, first name, surname — with medals and points, searchable by name (either way round), club or FSS ID; a name opens that person's record across all seasons, *Izmeni* corrects an entry and *+ Nova prijava* writes a new one, while entries are open |
 | **Klubovi**             | competitors, medals and points per club                                      |
 | **Žreb / Tabele**       | brackets per category, random draw and printing                              |
 | **Tatami**              | assignment of categories to mats                                             |
@@ -408,12 +417,13 @@ competitor 125 of 2026.
 - **Clubs learn it from paper.** It is printed on *Prijave po klubovima*, the
   sheet the coach checks and signs at the competition, and on the full list of
   competitors. The *Takmičari* screen shows it and searches by it.
-- **On the form** the *FSS ID* column takes this year's ID — or last year's,
-  until the club has the new one. A newcomer leaves it empty. The ID does not
-  replace the rest of the row; name, year and everything else are still filled
-  in.
+- **On the form** the *FSS ID* is the first column. It takes this year's ID —
+  or last year's, until the club has the new one. A newcomer leaves it empty.
+  The ID does not replace the rest of the row; name, year and everything else
+  are still filled in.
 - **On import** an ID names a person only when it agrees with the row's name
-  and year of birth (Petrovic and Petrović agree):
+  and year of birth (Petrovic and Petrović agree, as do Petar Petrović and
+  Petrović Petar):
   - this year's or an older ID of that person — that person, whichever club the
     form is from. Another club is a transfer: it is named in the report, and the
     person keeps their ID and their points;
@@ -543,19 +553,25 @@ remember it:
 
 - **Club, city and coach are entered once**, in the header of the first sheet;
   the team sheet picks them up by formula.
-- **Entry starts with the year of birth.** The *Grupa* and *Uzrast* columns are
-  formulas and are not filled by hand, and the dropdown offers **only the
-  disciplines possible for that age** — kumite never appears for a *poletarac*.
+- **A row starts with who it is:** *FSS ID*, *Ime*, *Prezime*, then *Godište*,
+  *Pol*, *Pojas* and the rest. These three columns stay in view while the coach
+  scrolls to the disciplines. The FSS ID is optional; whose ID it is, only the
+  application can check, on import.
+- **First name and surname are two columns** — on the team sheet as well, for
+  every member — so a row is checked at a glance and the two cannot run
+  together.
+- **The age group follows from the year of birth.** The *Grupa* and *Uzrast*
+  columns are formulas and are not filled by hand, and the dropdown offers
+  **only the disciplines possible for that age** — kumite never appears for a
+  *poletarac*.
 - **Body weight** depends on age group and sex and is entered only alongside
   Fudokan sport kumite.
 - **Year of birth** is a dropdown covering one hundred years, computed for the
   requested season.
-- **The name field accepts letters only**, plus space, hyphen and apostrophe;
+- **The name fields accept letters only**, plus space, hyphen and apostrophe;
   digits are rejected on entry.
-- **The FSS ID column** comes after everything else that is typed. It is
-  optional; whose ID it is, only the application can check, on import.
-- **The Provera column** verifies that the entry is complete — including the
-  shape of an FSS ID — and states in a full sentence what is missing.
+- **The Provera column** verifies the row in the order of its columns — the
+  shape of an FSS ID first — and states in a full sentence what is missing.
 - **Writing is possible only where intended** — both sheets are protected
   without a password, and only the input cells are unlocked.
 
@@ -698,6 +714,8 @@ Serbian.
 ```
 people        one person, once. Lives above competitions and is how points
               accumulate across seasons. Carries the yearly FSS IDs.
+              First name and surname are stored apart on people,
+              competitors and entries, next to the whole name.
 competitors   that person at one competition (club, belt, age on the day)
 entries       one entry = one competitor in one discipline
 results       a placement on one entry; points are derived from it
@@ -759,8 +777,10 @@ ID (spelled without diacritics), somebody else's ID, a malformed ID and an
 unknown one; a transfer to another club; the turn of the year, where last
 year's ID recognises the person and the new year numbers from 1; a deleted
 person's number not coming back; a merge leaving one ID for the year; the
-database refusing a second holder of an ID; a form without the ID column; and
-the ID on screen — the column, the search, the correction dialog and the record
+database refusing a second holder of an ID; a form from before the ID column
+and the split name; first name and surname swapped — in the two columns and in
+an old form's single column — still being one person; and the ID and the split
+name on screen — the columns, the search, the correction dialog and the record
 card.
 
 The import fixture is built **from the same form** that is distributed to clubs,
