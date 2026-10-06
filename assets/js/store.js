@@ -34,6 +34,7 @@ import {
   clubByName, groupOfYear, SEASON, DIPLOMA_DEFAULT, pointsCounted, BELTS, WEIGHTS,
   levelOfBelt, seasonOf, entriesOpen, FEES_DEFAULT, properName,
   FSS_ID_SINCE, fssId, fssIdOf, nextFssNumber, fssVerdict, nameWords, nameParts,
+  parseFssId, CLUBS,
 } from './data.js';
 
 /** The demo includes one past-season competition, split by its table. */
@@ -1118,6 +1119,49 @@ export const store = {
   async fssOwners() {
     const people = await all('people');
     return new Map(people.flatMap((p) => (p.fssIds || []).map((id) => [id, p])));
+  },
+
+  /**
+   * The list the club entry form carries, so a coach types an ID and the
+   * row fills itself: every FSS ID from last year on — a club writes last
+   * year's until it has the new one — with first name, surname, year, sex
+   * and the belt of the most recent appearance. The club decides whether a
+   * row fills at all (see build-entry-form.py), and the clubs are listed
+   * for the header's menu as well.
+   *
+   * @returns {Promise<{rows: Array<{id, firstName, lastName, year, sex, belt, club}>,
+   *                    clubs: string[]}>}
+   */
+  async entryFormRoster() {
+    const [people, competitors, competitions] = await Promise.all([
+      all('people'), all('competitors'), all('competitions'),
+    ]);
+    const dateOf = new Map(competitions.map((c) => [c.id, c.date || '']));
+    const lastBelt = new Map();
+    competitors.forEach((c) => {
+      const date = dateOf.get(c.competitionId) || '';
+      const seen = lastBelt.get(c.personId);
+      if (c.belt && (!seen || date >= seen.date)) lastBelt.set(c.personId, { date, belt: c.belt });
+    });
+
+    const since = SEASON() - 1;
+    const sexLabel = { M: 'muški', Ž: 'ženski' };
+    const rows = people.flatMap((p) => (p.fssIds || [])
+      .filter((id) => (parseFssId(id)?.year || 0) >= since)
+      .map((id) => {
+        const { first, last } = nameParts(p);
+        return {
+          id, firstName: first, lastName: last, year: p.year, sex: sexLabel[p.sex] || '',
+          belt: lastBelt.get(p.id)?.belt || '', club: p.club || '',
+        };
+      }));
+    rows.sort((a, b) => a.club.localeCompare(b.club, 'sr')
+      || a.lastName.localeCompare(b.lastName, 'sr')
+      || a.firstName.localeCompare(b.firstName, 'sr') || a.id.localeCompare(b.id));
+
+    const clubs = [...new Set([...CLUBS.map((c) => c.name), ...people.map((p) => p.club)])]
+      .filter(Boolean).sort((a, b) => a.localeCompare(b, 'sr'));
+    return { rows, clubs };
   },
 
   // === Entry corrections =============================================

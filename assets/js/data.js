@@ -33,7 +33,7 @@ export const DEMO_VERSION = 6;
  * to see whether the browser is serving the current build or a cached
  * one. Bumped together with CACHE in sw.js.
  */
-export const APP_VERSION = 'v67';
+export const APP_VERSION = 'v68';
 
 export const SEED_COMPETITION = {
   name: 'Prvenstvo Srbije 2026',

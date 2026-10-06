@@ -79,12 +79,30 @@ register immediately, and the other way round.
 
 ### 2. Send the form to the clubs
 
-The blank form is downloaded with the **Prazan formular za klubove** button on
-the *Uvoz prijava* screen, or taken from `form/FSS-Entry-Form.xlsx`. Clubs fill
-it in Excel on their own machines — they never open the application and do not
-need to have it. Each row starts with who the competitor is: their
-[FSS ID](#the-fss-id) if they have one, then first name and surname, each in its
-own column.
+The form is downloaded with the **Formular za klubove** button on the *Uvoz
+prijava* screen. **One file goes to every club**: the application writes the
+current list of competitors into it at the moment of the click. Clubs fill it
+in Excel on their own machines — they never open the application and do not
+need to have it.
+
+**The coach types as little as possible.** With the club picked from the menu in
+the header, a competitor who already has an [FSS ID](#the-fss-id) takes only the
+ID: first name, surname, year of birth, sex and belt fill themselves from the
+list, and the coach picks the disciplines (and the weight for sport kumite).
+The belt is the last one recorded, so it is corrected if the competitor has
+passed an exam since. A newcomer has no ID and is typed in full — first name
+and surname each in its own column.
+
+A row fills only for competitors of the club in the header. An ID of another
+club's competitor leaves the row empty and *Provera* names that club: a
+mistyped number would otherwise put a stranger on the list, and the import
+would take him for a transfer. A competitor who really has moved is typed by
+hand, and the import checks the typed name against the ID.
+
+The list ages: IDs handed out at the next competition are not in a file sent
+before it, so the form is downloaded again for every round of entries. It
+carries the name, year and club of everybody on the list — what the printed
+competition lists show anyway, but every club sees all of it.
 
 ### 3. Import the entries
 
@@ -418,9 +436,10 @@ competitor 125 of 2026.
   sheet the coach checks and signs at the competition, and on the full list of
   competitors. The *Takmičari* screen shows it and searches by it.
 - **On the form** the *FSS ID* is the first column. It takes this year's ID —
-  or last year's, until the club has the new one. A newcomer leaves it empty.
-  The ID does not replace the rest of the row; name, year and everything else
-  are still filled in.
+  or last year's, until the club has the new one — and the rest of the row
+  fills itself from the list the form carries (see
+  [Send the form to the clubs](#2-send-the-form-to-the-clubs)). A newcomer
+  leaves it empty and is typed in full.
 - **On import** an ID names a person only when it agrees with the row's name
   and year of birth (Petrovic and Petrović agree, as do Petar Petrović and
   Petrović Petar):
@@ -545,18 +564,26 @@ earlier table as well. Only A-list competitions carry points.
 
 `form/FSS-Entry-Form.xlsx` is a **standalone file**: the federation sends it to
 the clubs, coaches fill it in Excel and send it back. Two visible sheets —
-**Prijava** (individual) and **Ekipno** (team) — plus a hidden **Pravilnik**
-sheet holding the lookup lists.
+**Prijava** (individual) and **Ekipno** (team) — plus two hidden ones:
+**Pravilnik** with the lookup lists, and **Spisak**, the list of competitors by
+FSS ID. In the file as built, Spisak is empty; the *Formular za klubove* button
+writes the current list into a copy (`assets/js/entry-form.js` — values only,
+the formulas are the template's).
 
 The form walks the coach through the rulebook instead of expecting them to
 remember it:
 
 - **Club, city and coach are entered once**, in the header of the first sheet;
-  the team sheet picks them up by formula.
+  the team sheet picks them up by formula. The club is picked from a menu of
+  the clubs the federation knows; a new club may still be typed, after a
+  warning.
 - **A row starts with who it is:** *FSS ID*, *Ime*, *Prezime*, then *Godište*,
   *Pol*, *Pojas* and the rest. These three columns stay in view while the coach
-  scrolls to the disciplines. The FSS ID is optional; whose ID it is, only the
-  application can check, on import.
+  scrolls to the disciplines.
+- **A known competitor fills in from the ID.** *Ime*, *Prezime*, *Godište*,
+  *Pol* and *Pojas* hold formulas that look the ID up on Spisak — only for
+  competitors of the club in the header. The cells stay open for typing, so a
+  newcomer's row is simply typed over them.
 - **First name and surname are two columns** — on the team sheet as well, for
   every member — so a row is checked at a glance and the two cannot run
   together.
@@ -571,7 +598,8 @@ remember it:
 - **The name fields accept letters only**, plus space, hyphen and apostrophe;
   digits are rejected on entry.
 - **The Provera column** verifies the row in the order of its columns — the
-  shape of an FSS ID first — and states in a full sentence what is missing.
+  shape of an FSS ID first, then whether the ID is on the list and whose club
+  it belongs to — and states in a full sentence what is missing.
 - **Writing is possible only where intended** — both sheets are protected
   without a password, and only the input cells are unlocked.
 
@@ -690,6 +718,7 @@ assets/js/store.js            IndexedDB — the only seam to the data
 assets/js/app.js              router and every screen
 assets/js/import.js           reading a completed form into entries
 assets/js/xlsx.js             .xlsx (zip + XML) with no library
+assets/js/entry-form.js       the form for clubs, with today's list of competitors written in
 assets/js/draw.js             draw rules
 assets/js/doc-render.js       measuring, pagination and letterhead — shared renderer
 assets/js/doc-page.js         the <doc-page> component (from the design project)
@@ -779,9 +808,16 @@ year's ID recognises the person and the new year numbers from 1; a deleted
 person's number not coming back; a merge leaving one ID for the year; the
 database refusing a second holder of an ID; a form from before the ID column
 and the split name; first name and surname swapped — in the two columns and in
-an old form's single column — still being one person; and the ID and the split
-name on screen — the columns, the search, the correction dialog and the record
-card.
+an old form's single column — still being one person; the form with the list,
+built by the app, carrying the right IDs, people and clubs, and a row where the
+coach typed only the ID importing as that person; and the ID and the split name
+on screen — the columns, the search, the correction dialog and the record card.
+
+The check reads files the way the app does — cached values, no formulas
+worked out — so it stands in for Excel by writing the values Excel would save.
+The fill-in formulas themselves were worked through with a spreadsheet engine
+when they were written: own club fills, another club's ID and an unknown one
+leave the row to be typed, and *Provera* says why.
 
 The import fixture is built **from the same form** that is distributed to clubs,
 which incidentally verifies that its sheets and column headers are where the

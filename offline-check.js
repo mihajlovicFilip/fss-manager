@@ -169,6 +169,8 @@ const strCell = (ref, value) => ({
   col: colIndex(ref),
   xml: `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${esc(value)}</t></is></c>`,
 });
+/** A fill-in formula left in place, with the value Excel would save after working it out. */
+const cachedCell = (ref, value) => ({ col: colIndex(ref), ref, cached: value });
 
 function withCells(xml, rowNum, newCells) {
   if (!newCells.length) return xml;
@@ -180,17 +182,27 @@ function withCells(xml, rowNum, newCells) {
   const cells = (inner.match(/<c [^>]*?\/>|<c [^>]*?>[\s\S]*?<\/c>/g) || [])
     .map((c) => ({ col: colIndex(/r="([A-Z]+)\d+"/.exec(c)[1]), xml: c }));
   for (const c of newCells) {
-    // Input fields exist as empty styled cells (border, unlocked) —
-    // those are replaced, keeping the style. A cell with content is not
-    // overwritten: that would mean the form's layout changed.
+    // Input fields exist as styled cells (border, unlocked), empty or
+    // holding a fill-in formula with nothing worked out yet — those are
+    // written over, keeping the style, as a coach types over them. A cell
+    // with a value is not: that would mean the form's layout changed.
     const at = cells.findIndex((x) => x.col === c.col);
     if (at >= 0) {
       const old = cells[at].xml;
-      if (/<[vf][ >]|<is[ >]/.test(old)) {
+      const style = /\ss="\d+"/.exec(old)?.[0] || '';
+      if (c.cached !== undefined) {
+        const formula = /<f>[\s\S]*?<\/f>/.exec(old);
+        if (!formula) fail(`U ćeliji ${c.ref} formulara nema formule za popunjavanje.`);
+        const type = typeof c.cached === 'number' ? '' : ' t="str"';
+        cells[at] = { col: c.col, xml: `<c r="${c.ref}"${style}${type}>${formula[0]}<v>${esc(c.cached)}</v></c>` };
+        continue;
+      }
+      if (/<v>[^<]+<\/v>|<is[ >]/.test(old)) {
         fail(`Ćelija ${colLetter(c.col)}${rowNum} u formularu nije prazna — fikstura bi je pregazila.`);
       }
-      const style = /\ss="\d+"/.exec(old);
-      cells[at] = { col: c.col, xml: style ? c.xml.replace(/^<c r="[A-Z]+\d+"/, `$&${style[0]}`) : c.xml };
+      cells[at] = { col: c.col, xml: style ? c.xml.replace(/^<c r="[A-Z]+\d+"/, `$&${style}`) : c.xml };
+    } else if (c.cached !== undefined) {
+      fail(`U formularu nema ćelije ${c.ref} sa formulom za popunjavanje.`);
     } else cells.push(c);
   }
   cells.sort((a, b) => a.col - b.col);
@@ -295,14 +307,17 @@ function setHeader(xml, ref, text) {
 }
 
 /**
- * Writes the fixture into a copy of the real form. A fixture may name its
- * own club and give rows an FSS ID. `legacy` turns the copy into a form
- * from before the FSS ID and the split name: no ID column, and the whole
- * name in one column, "Ime i prezime" — individuals and team members alike.
+ * Writes the fixture into a copy of the real form — or of `template`, a
+ * form the app built. A fixture may name its own club and give rows an
+ * FSS ID. A row marked `filled` is what a coach sends after typing only
+ * the ID: the fill-in formulas stay, with the values Excel worked out.
+ * `legacy` turns the copy into a form from before the FSS ID and the
+ * split name: no ID column, and the whole name in one column, "Ime i
+ * prezime" — individuals and team members alike.
  */
-function fillForm(fixture, outPath, { legacy = false } = {}) {
+function fillForm(fixture, outPath, { legacy = false, template = null } = {}) {
   const club = fixture.club || CLUB;
-  const entries = readZip(fs.readFileSync(path.join(ROOT, 'form', 'FSS-Entry-Form.xlsx')));
+  const entries = readZip(template || fs.readFileSync(path.join(ROOT, 'form', 'FSS-Entry-Form.xlsx')));
   const byName = new Map(entries.map((e) => [e.name, e]));
 
   // A sheet name leads to its file through workbook.xml and its rels — as in xlsx.js.
@@ -332,13 +347,21 @@ function fillForm(fixture, outPath, { legacy = false } = {}) {
   fixture.people.forEach((p, i) => {
     const r = 11 + i;
     const [first, last] = partsOf(p);
+    const who = p.filled
+      ? [cachedCell(`${SOLO.first}${r}`, first), cachedCell(`${SOLO.last}${r}`, last),
+        cachedCell(`${SOLO.year}${r}`, p.year),
+        cachedCell(`${SOLO.sex}${r}`, p.sex === 'Ž' ? 'ženski' : 'muški'),
+        cachedCell(`${SOLO.belt}${r}`, p.belt)]
+      : [
+        ...(legacy
+          ? [strCell(`${SOLO.first}${r}`, p.name)]
+          : [strCell(`${SOLO.first}${r}`, first), strCell(`${SOLO.last}${r}`, last)]),
+        numCell(`${SOLO.year}${r}`, p.year),
+        strCell(`${SOLO.sex}${r}`, p.sex),
+        strCell(`${SOLO.belt}${r}`, p.belt),
+      ];
     const cells = [
-      ...(legacy
-        ? [strCell(`${SOLO.first}${r}`, p.name)]
-        : [strCell(`${SOLO.first}${r}`, first), strCell(`${SOLO.last}${r}`, last)]),
-      numCell(`${SOLO.year}${r}`, p.year),
-      strCell(`${SOLO.sex}${r}`, p.sex),
-      strCell(`${SOLO.belt}${r}`, p.belt),
+      ...who,
       ...p.disciplines.map((name, n) => strCell(`${colLetter(SOLO.disc + n)}${r}`, name)),
     ];
     if (p.weight) cells.push(strCell(`${SOLO.weight}${r}`, p.weight));
@@ -1009,6 +1032,62 @@ async function main() {
       }
       pass(`stari formular (ime u jednoj koloni, bez FSS ID-a) uvezen: ${reg.entries} prijava i ekipa, `
         + `isti ljudi i ID-evi, „${turned.lastName} ${turned.firstName}" prepoznat`);
+    }
+
+    // The form with the list: the app writes today's list into a copy, a
+    // coach types only an ID — Excel fills the rest — and the import takes
+    // the row as that person.
+    {
+      const built = await inStore(`
+        const { buildEntryForm } = await import('./assets/js/entry-form.js');
+        const { blob, listed } = await buildEntryForm(await store.entryFormRoster());
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        let text = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+          text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        }
+        return { data: btoa(text), listed };`);
+      const book = Buffer.from(built.data, 'base64');
+      const parts = new Map(readZip(book).map((e) => [e.name, inflate(e).toString()]));
+      const sheetOf = (name) => {
+        const rid = new RegExp(`<sheet[^>]*name="${name}"[^>]*r:id="(rId\\d+)"`).exec(parts.get('xl/workbook.xml'))[1];
+        const to = new RegExp(`Id="${rid}"[^>]*Target="([^"]+)"`).exec(parts.get('xl/_rels/workbook.xml.rels'))[1];
+        return parts.get(`xl/${to.replace(/^\/?xl\//, '')}`);
+      };
+      const rows = [...sheetOf('Spisak').matchAll(/<row r="\d+">([\s\S]*?)<\/row>/g)].map((m) =>
+        [...m[1].matchAll(/<c r="([A-Z]+)\d+"[^>]*>(?:<v>([^<]*)<\/v>|<is><t[^>]*>([^<]*)<\/t><\/is>)<\/c>/g)]
+          .map((c) => [c[1], c[2] !== undefined ? Number(c[2]) : c[3].replace(/&amp;/g, '&')]));
+      const people = await fssPeople();
+      const who = P[8];
+      const id = idOf(people, who.name);
+      const row = Object.fromEntries(rows.find((r) => r[0]?.[1] === id) || []);
+      const want = { A: id, B: who.firstName, C: who.lastName, D: who.year,
+        E: who.sex === 'Ž' ? 'ženski' : 'muški', F: who.belt, G: CLUB.name };
+      Object.entries(want).forEach(([col, value]) => {
+        if (row[col] !== value) fail(`Na spisku u formularu ${id} u koloni ${col} stoji „${row[col]}", a ne „${value}".`);
+      });
+      const clubs = rows.flatMap((r) => r.filter(([col]) => col === 'I').map(([, v]) => v));
+      if (!clubs.includes(CLUB.name) || (mover && !clubs.includes('KK Provera Dva'))) {
+        fail(`Meni klubova u formularu nema klubove iz baze: ${clubs.join(', ')}`);
+      }
+      if (!/spisak takmičara od/.test(sheetOf('Prijava'))) fail('Formular ne kaže od kada je spisak.');
+
+      const comp4 = await createCompetition('Provera formulara sa spiskom', `${season}-08-10`);
+      const form = path.join(tmp, 'KK-Provera-spisak.xlsx');
+      fillForm({
+        competitionName: 'Provera formulara sa spiskom', team: null,
+        people: [{ ...who, fss: id, filled: true }],
+      }, form, { template: book });
+      await importForm(form, comp4);
+      const after = await fssPeople();
+      const reg = await inStore(`return (await store.registryFor(${JSON.stringify(comp4)})).competitors
+        .map((c) => ({ personId: c.personId, name: c.name, fssId: c.fssId, entries: 0 }));`);
+      if (reg.length !== 1 || reg[0].personId !== personNamed(people, who.name).id || reg[0].fssId !== id) {
+        fail(`Red popunjen iz spiska nije uvezen kao ${who.name}: ${JSON.stringify(reg)}`);
+      }
+      if (after.length !== people.length) fail('Red popunjen iz spiska napravio je novu osobu.');
+      pass(`formular sa spiskom: ${built.listed} FSS ID-eva i klubovi upisani, `
+        + `trener upiše samo ${id} — uvezen je ${who.name}`);
     }
 
     // On screen: the column, search by ID, read-only in the correction,

@@ -47,7 +47,9 @@ import xlsxwriter
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = Path(__file__).resolve().parent / 'FSS-Entry-Form.xlsx'
 
-ROWS = 120          # koliko praznih redova formular nudi
+ROWS = 120          # how many blank rows the form offers
+SPISAK = 5000       # how many FSS IDs the list sheet can hold (entry-form.js writes it)
+KLUBOVI = 500       # how many clubs the header's menu can offer
 
 # === The rulebook from the app =============================================
 
@@ -62,7 +64,7 @@ def rulebook(season):
         "import('./assets/js/data.js').then(m => console.log(JSON.stringify({"
         f"AGES: m.AGES.map(a => ({{code: a.code, name: a.name,"
         f" od: m.yearsOf(a, {season}).najstarije, oznaka: m.yearsLabel(a, {season})}})),"
-        "BELTS: m.BELTS, WEIGHTS: m.WEIGHTS,"
+        "BELTS: m.BELTS, WEIGHTS: m.WEIGHTS, CLUBS: m.CLUBS.map(c => c.name),"
         "DISCIPLINES: m.DISCIPLINES.map(d => ({name: d.name, groups: d.groups,"
         " drawBy: d.drawBy, team: d.team || null, variants: d.variants || null}))"
         "})))"
@@ -270,6 +272,38 @@ def write_rulebook(wb, p):
     return ws
 
 
+# === Hidden list of competitors =============================================
+
+SPISAK_KOLONE = ('id', 'ime', 'prezime', 'godiste', 'pol', 'pojas', 'klub')
+
+
+def write_roster(wb, p):
+    """
+    The federation's list of competitors by FSS ID — what a row on the
+    Prijava sheet fills itself from once the coach types an ID. Empty in
+    this file: the app writes the current list into a copy before it is
+    sent (Uvoz prijava → Formular za klubove, assets/js/entry-form.js).
+    Column I holds the clubs the header's menu offers — those from
+    data.js, until the app writes its own.
+    """
+    ws = wb.add_worksheet('Spisak')
+    ws.hide()
+    ws.write_row(0, 0, ['FSS ID', 'Ime', 'Prezime', 'Godište', 'Pol', 'Pojas', 'Klub'])
+    ws.write(0, 8, 'Klubovi')
+    for i, klub in enumerate(p['CLUBS'], start=1):
+        ws.write(i, 8, klub)
+
+    for k, ime in enumerate(SPISAK_KOLONE):
+        s = column_letter(k)
+        wb.define_name(f'spisak_{ime}', f'=Spisak!${s}$2:${s}${SPISAK + 1}')
+    # Only as long as the list, so the menu shows no empty lines.
+    wb.define_name('klubovi',
+                   f'=OFFSET(Spisak!$I$2,0,0,MAX(1,COUNTA(Spisak!$I$2:$I${KLUBOVI + 1})),1)')
+
+    ws.protect()
+    return ws
+
+
 # === Sheet: individual entries =============================================
 
 def sheet_individual(wb, p, s):
@@ -284,6 +318,10 @@ def sheet_individual(wb, p, s):
     K_PROVERA = K_KILAZA + 1
     K_POMOC_D = K_PROVERA + 1
     K_POMOC_K = K_PROVERA + 2
+    # The typed ID's row on the list, or 0; and the same only when that
+    # competitor is of the club in the header — only then does a row fill.
+    K_NADJEN = K_PROVERA + 3
+    K_SVOJ = K_PROVERA + 4
 
     kolone = [('FSS ID', 13), ('Ime', 16), ('Prezime', 18), ('Godište', 10), ('Pol', 10),
               ('Pojas', 11), ('Grupa', 8), ('Uzrast', 16)]
@@ -291,7 +329,7 @@ def sheet_individual(wb, p, s):
     kolone += [('Telesna težina', 12), ('Provera', 34)]
     for i, (naslov, sirina) in enumerate(kolone):
         ws.set_column(i, i, sirina)
-    ws.set_column(K_POMOC_D, K_POMOC_K, 14, None, {'hidden': True})
+    ws.set_column(K_POMOC_D, K_SVOJ, 14, None, {'hidden': True})
 
     ws.write(0, 0, 'PRIJAVA TAKMIČARA', s['naslov'])
     # The edition in plain sight — it tells a fresh file from an old one
@@ -299,19 +337,22 @@ def sheet_individual(wb, p, s):
     ws.write(1, 0, 'Fudokan savez Srbije · popunjava klub i dostavlja savezu · '
                    f'takmičarska sezona {p["sezona"]}. · '
                    f'izdanje {datetime.date.today().strftime("%d.%m.%Y.")}', s['sitno'])
-    ws.set_row(2, 40)
+    ws.set_row(2, 52)
     ws.merge_range(2, 0, 2, K_PROVERA, (
-        'U prvu kolonu upisuje se FSS ID takmičara sa spiska saveza — za '
-        f'{p["sezona"]}. godinu, a dok ga takmičar nema, prošlogodišnji; takmičar koji '
-        'nastupa prvi put ostaje bez ID-a, nov ID dodeljuje savez. Ime i prezime upisuju se '
-        'svako u svoju kolonu. Uzrasna grupa i naziv uzrasta popunjavaju se automatski iz '
-        'godišta, a padajući meni nudi discipline koje su moguće u odnosu na uzrast. Telesna '
-        'težina unosi se isključivo uz Fudokan sport kumite, budući da je tradicionalni '
-        'kumite apsolutna kategorija. Kolona „Provera" služi za proveru kompletnosti '
-        'prijave. Ekipne prijave se unose na listu „Ekipno".'),
+        'Klub se bira u zaglavlju. Za takmičara koji već ima FSS ID dovoljno je upisati ID — '
+        f'za {p["sezona"]}. godinu, a dok ga takmičar nema, prošlogodišnji: ime, prezime, '
+        'godište, pol i pojas popunjavaju se sami sa spiska saveza, a bira se samo disciplina. '
+        'Pojas treba ispraviti ako je takmičar u međuvremenu polagao. Takmičar koji nastupa '
+        'prvi put nema ID: njemu se upisuju ime i prezime, svako u svoju kolonu, i ostali '
+        'podaci, a nov ID dodeljuje savez. Uzrasna grupa i naziv uzrasta izvode se iz godišta, '
+        'a padajući meni nudi discipline koje su moguće u odnosu na uzrast. Telesna težina '
+        'unosi se isključivo uz Fudokan sport kumite, budući da je tradicionalni kumite '
+        'apsolutna kategorija. Kolona „Provera" služi za proveru kompletnosti prijave. Ekipne '
+        'prijave se unose na listu „Ekipno".'),
         s['uputstvo'])
 
-    for red, ime, napomena in ((3, 'Klub', 'pun naziv kluba, onako kako se navodi u rezultatima'),
+    for red, ime, napomena in ((3, 'Klub', 'bira se sa spiska; nov klub upisuje pun naziv, '
+                                           'onako kako se navodi u rezultatima'),
                                (4, 'Grad', ''),
                                (5, 'Trener', ''),
                                (6, 'Takmičenje', 'naziv takmičenja za koje se prijava podnosi')):
@@ -319,6 +360,12 @@ def sheet_individual(wb, p, s):
         ws.write_blank(red, 1, None, s['unos'])
         if napomena:
             ws.write(red, 3, napomena, s['sitno'])
+    # The club decides whose rows fill, so it is picked, not retyped. A club
+    # not on the list is still accepted — with a question first.
+    ws.data_validation(3, 1, 3, 1, {
+        'validate': 'list', 'source': '=klubovi', 'ignore_blank': True, 'dropdown': True,
+        'error_type': 'warning', 'error_title': 'Klub',
+        'error_message': 'Ovog kluba nema na spisku saveza. Ako je klub nov, potvrdi upis.'})
 
     ZAGLAVLJE = 9                      # Excel row 10
     ws.set_row(ZAGLAVLJE, 30)
@@ -330,12 +377,30 @@ def sheet_individual(wb, p, s):
         column_letter(k) for k in (K_FSS, K_IME, K_PREZIME, K_GOD, K_POL, K_POJAS, K_GRUPA))
     disc_od, disc_do = column_letter(K_DISC), column_letter(K_DISC + n_disc - 1)
     kg, pomoc_d, pomoc_k = column_letter(K_KILAZA), column_letter(K_POMOC_D), column_letter(K_POMOC_K)
+    nadjen, svoj = column_letter(K_NADJEN), column_letter(K_SVOJ)
     primer = f'FSS-12/{p["sezona"] % 100:02d}'
 
     for r in range(prvi, posl + 1):
         e = r + 1                      # the row number as Excel sees it
-        for c in [K_FSS, K_IME, K_PREZIME, K_GOD, K_POL, K_POJAS] + list(range(K_DISC, K_KILAZA + 1)):
+        for c in [K_FSS] + list(range(K_DISC, K_KILAZA + 1)):
             ws.write_blank(r, c, None, s['unos'])
+
+        # The ID looked up on the list. A competitor of another club does
+        # not fill the row: a mistyped number then lands on a stranger, and
+        # the import would take it for a transfer. Such a row is written
+        # by hand, and the import checks the name against the ID.
+        ws.write_formula(r, K_NADJEN,
+                         f'=IF(${fss}{e}="",0,IFERROR(MATCH(TRIM(${fss}{e}),spisak_id,0),0))', None, 0)
+        ws.write_formula(r, K_SVOJ, (
+            f'=IF(${nadjen}{e}=0,0,'
+            f'IF(TRIM(INDEX(spisak_klub,${nadjen}{e}))=TRIM($B$4),${nadjen}{e},0))'), None, 0)
+        # What fills itself is a formula in a cell open for typing: a
+        # newcomer's row is simply typed over it.
+        for k, polje in ((K_IME, 'ime'), (K_PREZIME, 'prezime'), (K_POL, 'pol'), (K_POJAS, 'pojas')):
+            ws.write_formula(r, k, f'=IF(${svoj}{e}=0,"",INDEX(spisak_{polje},${svoj}{e})&"")',
+                             s['unos'], '')
+        ws.write_formula(r, K_GOD, f'=IF(${svoj}{e}=0,"",INDEX(spisak_godiste,${svoj}{e}))',
+                         s['unos'], '')
 
         ws.write_formula(r, K_GRUPA, f'={group_formula(f"${god}{e}")}', s['izvedeno'], '')
         ws.write_formula(r, K_UZRAST, f'={age_name_formula(f"${grupa}{e}")}', s['izvedeno'], '')
@@ -346,6 +411,13 @@ def sheet_individual(wb, p, s):
         provera = first_failing([
             (f'AND(${fss}{e}<>"",NOT({fss_format(f"${fss}{e}")}))',
              f'"FSS ID se upisuje u obliku {primer}"'),
+            (f'AND(${fss}{e}<>"",TRIM($B$4)="")',
+             '"Klub nije izabran u zaglavlju — bez njega se red ne popunjava"'),
+            (f'AND(${fss}{e}<>"",${nadjen}{e}=0,${ime}{e}="")',
+             '"FSS ID nije na spisku saveza — upiši ime, prezime i ostale podatke"'),
+            (f'AND(${nadjen}{e}>0,${svoj}{e}=0,${ime}{e}="")',
+             f'"FSS ID pripada takmičaru kluba "&INDEX(spisak_klub,${nadjen}{e})'
+             f'&" — ako je prešao u vaš klub, upiši ime i prezime"'),
             (f'${ime}{e}=""', '"Nedostaje ime"'),
             (f'NOT({letters_only(f"${ime}{e}")})', '"Ime sadrži znakove koji nisu slova"'),
             (f'${prezime}{e}=""', '"Nedostaje prezime"'),
@@ -364,11 +436,10 @@ def sheet_individual(wb, p, s):
             (f'AND(COUNTIF({disc},"Fudokan sport kumite")=0,{kg}{e}<>"")',
              '"Telesna težina se unosi isključivo uz Fudokan sport kumite"'),
         ], 'prijava je kompletna')
-        # Columns A–F are all typed, so one range counts them. A row with
-        # only an ID is not empty: the ID does not replace the rest.
-        ws.write_formula(r, K_PROVERA,
-                         f'=IF(COUNTA(${fss}{e}:${pojas}{e},{disc},{kg}{e})=0,"",{provera})',
-                         s['provera'], '')
+        # Empty means nothing written: COUNTA would count the fill-in
+        # formulas, LEN counts only what shows.
+        prazno = f'SUMPRODUCT(LEN(${fss}{e}:${pojas}{e}))+SUMPRODUCT(LEN({disc}))+LEN({kg}{e})=0'
+        ws.write_formula(r, K_PROVERA, f'=IF({prazno},"",{provera})', s['provera'], '')
 
         # The named range the menu fills from. The whole calculation
         # sits here in a cell, so the validation rule stays simplest.
@@ -592,6 +663,7 @@ def main():
     sheet_individual(wb, p, s)
     sheet_teams(wb, p, s)
     write_rulebook(wb, p)
+    write_roster(wb, p)
     wb.close()
 
     verify(OUTPUT)

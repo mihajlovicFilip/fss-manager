@@ -21,6 +21,7 @@ import { cell, col, boardCard, slipLine, uniqueCount, bracketHtml } from './doc-
 import { drawCategory, MAX_BRACKET } from './draw.js';
 import { setPrintable, printNow, printStack, visibleIds, onScreen, filterLabel } from './print.js';
 import { readEntryFile } from './import.js';
+import { buildEntryForm } from './entry-form.js';
 
 // === Helpers =============================================
 
@@ -2102,7 +2103,9 @@ function importHtml({ competitions, activeId }) {
       </label>
       <button type="button" class="btn-app is-primary" data-import-run ${ready ? '' : 'disabled'}>
         ${ready ? `Uvezi ${esc(koliko)}` : 'Uvezi prijave'}</button>
-      <a class="btn-app is-quiet" href="form/FSS-Entry-Form.xlsx" download>Prazan formular za klubove</a>
+      <button type="button" class="btn-app is-quiet" data-entry-form
+        title="Jedan fajl za sve klubove, sa spiskom takmičara: trener upiše FSS ID i red se popuni sam">
+        Formular za klubove</button>
       ${s.files.length ? '<button type="button" class="btn-app is-quiet" data-import-clear>Isprazni</button>' : ''}
     </div>
 
@@ -4033,6 +4036,29 @@ document.addEventListener('click', async (event) => {
   }
 
   // === Entry import =============================================
+  // The form for clubs carries today's list, so it is built on the click,
+  // not stored — one file for every club.
+  const formButton = event.target.closest('[data-entry-form]');
+  if (formButton) {
+    formButton.disabled = true;
+    try {
+      const { blob, listed, left } = await buildEntryForm(await store.entryFormRoster());
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `FSS-Entry-Form-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
+      toast(`Formular je preuzet — na spisku ${listed} ${plural(listed, 'FSS ID', 'FSS ID-a', 'FSS ID-eva')}`
+        + (left ? `, ${left} nije stalo` : '') + '. Isti fajl ide svim klubovima.');
+    } catch (err) {
+      toast(`Formular nije napravljen: ${err.message}`);
+    }
+    formButton.disabled = false;
+    return;
+  }
+
   if (event.target.closest('[data-import-clear]')) {
     resetImport();
     render();

@@ -13,7 +13,7 @@
  * activate.
  */
 
-const CACHE = 'fss-manager-v67';
+const CACHE = 'fss-manager-v68';
 
 const SHELL = [
   './',
@@ -35,6 +35,7 @@ const SHELL = [
   'assets/js/print.js',
   'assets/js/import.js',
   'assets/js/xlsx.js',
+  'assets/js/entry-form.js',
   'assets/fonts/barlow-400.woff',
   'assets/fonts/barlow-500.woff',
   'assets/fonts/barlow-600.woff',
